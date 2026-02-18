@@ -1,16 +1,17 @@
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <cmath>
 #include <conio.h>
 #include <windows.h>
 #include <algorithm>
 #include <fstream>
+#include <sstream>
 #include <string>
 using namespace std;
 
 const float PI = 3.1415926535f;
-const int row = 100;
-const int col = 220;
+int row = 100;
+int col = 220;
 float hfov = 90;
 float cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 
@@ -18,6 +19,16 @@ vector<char> validInputsMap = { 'w', 'a', 's', 'd', ' ', 'v', 72, 80, 75, 77, 'r
 vector<vector<char>> screen(row, vector<char>(col, ' '));
 vector<vector<bool>> screenpoints(row, vector<bool>(col, 0));
 const char ch = '*';
+
+//Helper functions {
+float toradian(float angle) { return ((angle * PI) / 180.0f); }
+bool fileExists(const std::string& name) {
+	std::ifstream f(name.c_str());
+	return f.good();
+}
+// }
+
+
 
 class point3d
 {
@@ -40,13 +51,11 @@ void setCursorPosition(int x, int y)
 	SetConsoleCursorPosition(hOut, coord);
 }
 
-float toradian(float angle){return ((angle * PI) / 180.0f);}
-
 class Camera
 {
 public:
 	float x = 0;
-	float y = 0;
+	float y = -4;
 	float z = 1.5;
 
 	float yaw = 0;  //degrees, towards y positive (North) = 0, right = pos until 360
@@ -129,56 +138,6 @@ public:
 };
 Camera camera;
 
-static void save()
-{
-	ofstream outputFile;
-	outputFile.open("Save File.txt");
-	outputFile << "camera.x=" << camera.x << endl;
-	outputFile << "camera.y=" << camera.y << endl;
-	outputFile << "camera.z=" << camera.z << endl;
-	outputFile << "camera.yaw=" << camera.yaw << endl;
-	outputFile << "camera.pitch=" << camera.pitch << endl;
-	outputFile.close();
-}
-static void load()
-{
-	ifstream savefile;
-	savefile.open("Save File.txt");
-	string line;
-	while (getline(savefile, line))
-	{
-		if (!line.empty() && line.back() == '\r')
-		{
-			line.pop_back();
-		}
-		size_t delimiter_pos = line.find('=');
-		string key = line.substr(0, delimiter_pos);
-		string value = line.substr(delimiter_pos + 1);
-		try
-		{
-			if (key == "camera.x")
-				camera.x = stof(value);
-			else if (key == "camera.y")
-				camera.y = stof(value);
-			else if (key == "camera.z")
-				camera.z = stof(value);
-			else if (key == "camera.yaw")
-				camera.yaw = stof(value);
-			else if (key == "camera.pitch")
-				camera.pitch = stof(value);
-		}
-		catch (const std::invalid_argument& e)
-		{
-			cerr << "Warning: Corrupted or invalid data in save file for key: " << key << endl;
-		}
-		catch (const std::out_of_range& e)
-		{
-			cerr << "Warning: Value out of range in save file for key: " << key << endl;
-		}
-	}
-	savefile.close();
-}
-
 struct TriangleToRender
 {
 	point3d p1, p2, p3;
@@ -187,6 +146,103 @@ struct TriangleToRender
 };
 
 vector<TriangleToRender> queue;
+
+class Model
+{
+public:
+	vector<TriangleToRender> meshTriangles;
+
+	// Helper to apply scale and position offset
+	point3d transform(point3d p, float scale, float offX, float offY, float offZ)
+	{
+		return point3d(p.x * scale + offX, p.y * scale + offY, p.z * scale + offZ);
+	}
+
+
+
+	void load(string filename, float x, float y, float z, float scale = 1.0f, char symbol = '#')
+	{
+		meshTriangles.clear();
+		vector<point3d> tempVertices;
+		ifstream file(filename);
+
+		if (!file.is_open())
+		{
+			cerr << "Error: Could not open file " << filename << endl;
+			return;
+		}
+
+		string line;
+		while (getline(file, line))
+		{
+			stringstream ss(line);
+			string type;
+			ss >> type;
+
+			if (type == "v") // Vertex
+			{
+				float vx, vy, vz;
+				ss >> vx >> vz >> vy;
+				//switching y and z for compatibility
+				tempVertices.push_back(point3d(vx, vy, vz));
+			}
+			else if (type == "f") // Face
+			{
+				vector<int> vertexIndices;
+				string segment;
+
+				// Parse indices (e.g., "1/2/3" or "1//3" or "1")
+				while (ss >> segment)
+				{
+					// Find the first slash to isolate the vertex index
+					size_t slashPos = segment.find('/');
+					string indexStr = (slashPos != string::npos) ? segment.substr(0, slashPos) : segment;
+
+					// OBJ indices are 1-based, convert to 0-based
+					vertexIndices.push_back(stoi(indexStr) - 1);
+				}
+
+				// Triangulate the face (handles triangles and quads)
+				// Creates a triangle fan: (0, 1, 2), (0, 2, 3), etc.
+				for (size_t i = 1; i < vertexIndices.size() - 1; ++i)
+				{
+					TriangleToRender tri;
+
+					// Get raw vertices
+					point3d p1Raw = tempVertices[vertexIndices[0]];
+					point3d p2Raw = tempVertices[vertexIndices[i]];
+					point3d p3Raw = tempVertices[vertexIndices[i + 1]];
+
+					// Apply Scale and Position
+					tri.p1 = transform(p1Raw, scale, x, y, z);
+					tri.p2 = transform(p2Raw, scale, x, y, z);
+					tri.p3 = transform(p3Raw, scale, x, y, z);
+
+					tri.symbol = symbol;
+					meshTriangles.push_back(tri);
+				}
+			}
+		}
+		file.close();
+		cout << "Loaded Model: " << filename << " with " << meshTriangles.size() << " triangles." << endl;
+	}
+
+	void addToScene()
+	{
+		for (const auto& tri : meshTriangles)
+		{
+			queue.push_back(tri);
+		}
+	}
+};
+vector<Model> sceneModels;
+
+void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, char symbol = '#')
+{
+	Model m;
+	m.load(filename, x, y, z, scale, symbol);
+	sceneModels.push_back(m);
+}
 
 class point //point on projection plane
 {
@@ -218,7 +274,7 @@ void screenPointSet(int x, int y)
 		screenpoints[_row][_col] = 1;
 }
 
-void pointConnect(point point1, point point2, bool show = 0)
+void pointConnect(point &point1, point &point2, bool show = 0)
 {
 	float x1, y1, x2, y2;
 	x1 = point1.y - (col % 2 ? (col - 1) / 2 : col / 2);
@@ -350,7 +406,7 @@ void pointConnect(point point1, point point2, bool show = 0)
 	}
 }
 
-void triangle(point point1, point point2, point point3, char c = ch)
+void printTriangle(point &point1, point &point2, point &point3, char c = ch)
 {
 	for (auto& rowVec : screenpoints)
 		fill(rowVec.begin(), rowVec.end(), false);
@@ -389,7 +445,7 @@ void triangle(point point1, point point2, point point3, char c = ch)
 	}
 }
 
-int project3d(point3d pointa, char c)
+int project3d(point3d &pointa, char c)
 {
 	float _col = ((cameratoScreen / pointa.y) * pointa.x) + col / 2.0f;
 	float _row = ((cameratoScreen / pointa.y) * -pointa.z) + row / 2.0f;
@@ -399,7 +455,7 @@ int project3d(point3d pointa, char c)
 	else if (c == 'y')
 		return((row / 2.0f) - _row);
 }
-point3d transformtoCamSpace(point3d w)
+point3d transformtoCamSpace(const point3d &w)
 {
 	float newx = w.x - camera.x;
 	float newy = w.y - camera.y;
@@ -421,7 +477,7 @@ point3d transformtoCamSpace(point3d w)
 	return point3d(yawedx, pitchedy, pitchedz);
 }
 
-void renderTriangle3d(TriangleToRender tri)
+void renderTriangle3d(const TriangleToRender& tri)
 {
 	point3d cama = transformtoCamSpace(tri.p1);
 	point3d camb = transformtoCamSpace(tri.p2);
@@ -435,7 +491,7 @@ void renderTriangle3d(TriangleToRender tri)
 	point point2(project3d(camb, 'x'), project3d(camb, 'y'));
 	point point3(project3d(camc, 'x'), project3d(camc, 'y'));
 
-	triangle(point1, point2, point3, tri.symbol);
+	printTriangle(point1, point2, point3, tri.symbol);
 }
 
 void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch)
@@ -540,6 +596,7 @@ public:
 };
 vector<block> worldBlocks;
 
+
 point3d unitvectorcamera()
 {
 	float normalyaw = toradian(90+(360 - camera.yaw));
@@ -574,16 +631,16 @@ raycastResult raycast(bool tobreak = 0)
 		currentpos.y += unitvect.y * advance;
 		currentpos.z += unitvect.z * advance;
 
+		if (!tobreak && currentpos.z >= -1 && currentpos.z <= 0)
+		{
+			return { -2, emptypos };
+		}
 		for(int i = 0; i < worldBlocks.size(); i++)
 		{
-			if (!tobreak && currentpos.z >= -1 && currentpos.z <= 0)
-			{
-				return { i, emptypos };
-			}
 			if (
-				(currentpos.x >= worldBlocks[i].o.x && currentpos.x <= worldBlocks[i].o.x + 1 &&
+				currentpos.x >= worldBlocks[i].o.x && currentpos.x <= worldBlocks[i].o.x + 1 &&
 				currentpos.y >= worldBlocks[i].o.y && currentpos.y <= worldBlocks[i].o.y + 1 &&
-				currentpos.z >= worldBlocks[i].o.z && currentpos.z <= worldBlocks[i].o.z + 1)
+				currentpos.z >= worldBlocks[i].o.z && currentpos.z <= worldBlocks[i].o.z + 1
 			   )
 			{
 				return { i, emptypos };
@@ -614,58 +671,40 @@ void breakBlock()
 	worldBlocks.erase(worldBlocks.begin() + result.blockindex);
 }
 
-void action(char c)
-{
-	if (c == 'w') camera.move('f', 0.5);
-	else if (c == 's') camera.move('b', 0.5);
-	else if (c == 'a') camera.move('l', 0.5);
-	else if (c == 'd') camera.move('r', 0.5);
-
-	else if (c == ' ') camera.move('u', 0.5);
-	else if (c == 'v') camera.move('d', 0.5);
-
-	else if(c == 72) camera.cameramove('u', 5);
-	else if (c == 75) camera.cameramove('l', 5);
-	else if (c == 80) camera.cameramove('d', 5);
-	else if (c == 77) camera.cameramove('r', 5);
-
-	else if (c == 'r') system("cls");
-
-	else if (c == 'o') save();
-
-	else if (c == 'e') placeBlock();
-	else if (c == 'q') breakBlock();
-}
 
 void show()
 {
 	screen[row / 2][col / 2] = 'O';
 	setCursorPosition(0, 0);
+
+	string fullFrame = "";
+	fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
 	for (int i = 0; i < col * 2 + 1; i++)
-		cout << "_";
-	cout << "\n";
+		fullFrame += "_";
+	fullFrame += "\n";
+
+	for (int i = 0; i < row; i++)
 	{
-		string buffer;
-		buffer.reserve(col * 2);
-		for (int i = 0; i < row; i++)
+		fullFrame += "|";
+		for (int j = 0; j < col; j++)
 		{
-			cout << "|";
-			buffer.clear();
-			for (int j = 0; j < col; j++)
-			{
-				buffer = buffer + screen[i][j] + ' ';
-			}
-			cout << buffer << "|\n";
+			fullFrame += screen[i][j];
+			fullFrame += ' ';
 		}
+		fullFrame += "|\n";
 	}
 	for (int i = 0; i < col * 2 + 1; i++)
-		cout << "_";
-	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch 
-	<< "                                        \n";
+		fullFrame += "_";
+
+	printf("%s", fullFrame.c_str());
+	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch
+		<< "                                        \n";
+
 
 	for (auto& rowVec : screen)
 		fill(rowVec.begin(), rowVec.end(), ' ');
 }
+
 
 void road()
 {
@@ -745,6 +784,12 @@ void render()
 	{
 		worldBlocks[i].add();
 	}
+
+	for (auto& model : sceneModels)
+	{
+		model.addToScene();
+	}
+
 	for (auto& tri : queue)
 	{
 		point3d p1_cam = transformtoCamSpace(tri.p1);
@@ -765,62 +810,264 @@ void render()
 	}
 }
 
-void prepareWorld()
+static void save()
 {
-	for(int i = 1; i <= 5; i++) //HELLO
+	ofstream outputFile;
+	outputFile.open("Save File.txt");
+	outputFile << "camera.x=" << camera.x << "\n";
+	outputFile << "camera.y=" << camera.y << "\n";
+	outputFile << "camera.z=" << camera.z << "\n";
+	outputFile << "camera.yaw=" << camera.yaw << "\n";
+	outputFile << "camera.pitch=" << camera.pitch << "\n";
+	outputFile.close();
+}
+static void load()
+{
+	string filename = "Render Settings.txt";
+	if (!fileExists(filename))
 	{
-		worldBlocks.emplace_back(-5, 12, i);
-		worldBlocks.emplace_back(-2, 12, i);
-
-		worldBlocks.emplace_back(0, 12, i);
-
-		worldBlocks.emplace_back(5, 12, i);
-
-		worldBlocks.emplace_back(10, 12, i);
+		ofstream outFile(filename);
+		outFile << "row=110\ncol=220\n\nfov=90";
+		outFile.close();
 	}
-	worldBlocks.emplace_back(-4, 12, 3);
-	worldBlocks.emplace_back(-3, 12, 3);
-	for (int i = 1; i <= 3; i++)
+
+	filename = "Models Positions.txt";
+	if (!fileExists(filename))
 	{
-		worldBlocks.emplace_back(i, 12, 1);
-		worldBlocks.emplace_back(i, 12, 3);
-		worldBlocks.emplace_back(i, 12, 5);
-
-		worldBlocks.emplace_back(15, 12, i+1);
-
-		worldBlocks.emplace_back(18, 12, i+1);
+		ofstream outFile(filename);
+		outFile << "Include 3D models here (Only obj files are supported)\n\nHow to use :\nfirst type m. Then after a space, the name of the file(including \".obj \"), after a space, type the x, y and z coordinates(positive z is up) of your desired position to place the model at, all separated by space. After another space, type the scale of the object(1 means original size), after another space, type a character(8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in(x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
+		outFile.close();
 	}
-	for (int i = 6; i <= 13; i++)
-	{
-		worldBlocks.emplace_back(i, 12, 1);
-		if (i == 8) i = 10;
-	}
-	worldBlocks.emplace_back(16, 12, 1);
-	worldBlocks.emplace_back(17, 12, 1);
-	worldBlocks.emplace_back(16, 12, 5);
-	worldBlocks.emplace_back(17, 12, 5);
 
-	/*for (int i = 0; i < 8; i++)
+
+	ifstream savefile;
+	savefile.open("Save File.txt");
+	string line;
+	while (getline(savefile, line))
 	{
-		for (int j = 0; j < 8; j++)
+		if (line.empty()) continue;
+		if (line.back() == '\r')
 		{
-			for (int k = 0; k < 8; k++)
+			line.pop_back();
+		}
+		size_t delimiter_pos = line.find('=');
+		string key = line.substr(0, delimiter_pos);
+		string value = line.substr(delimiter_pos + 1);
+		try
+		{
+			if (key == "camera.x")
+				camera.x = stof(value);
+			else if (key == "camera.y")
+				camera.y = stof(value);
+			else if (key == "camera.z")
+				camera.z = stof(value);
+			else if (key == "camera.yaw")
+				camera.yaw = stof(value);
+			else if (key == "camera.pitch")
+				camera.pitch = stof(value);
+		}
+		catch (const std::invalid_argument& e)
+		{
+			cerr << "Warning: Corrupted or invalid data in save file for key: " << key << endl;
+		}
+		catch (const std::out_of_range& e)
+		{
+			cerr << "Warning: Value out of range in save file for key: " << key << endl;
+		}
+	}
+	savefile.close();
+
+	ifstream settings;
+	settings.open("Renderer Settings.txt");
+	bool settingsChanged = false;
+	while (getline(settings, line))
+	{
+		if (line.empty()) continue;
+		if (line.back() == '\r')
+		{
+			line.pop_back();
+		}
+
+		size_t delimiter_pos = line.find('=');
+		string key = line.substr(0, delimiter_pos);
+		string value = line.substr(delimiter_pos + 1);
+		try
+		{
+			if (key == "fov")
 			{
-				worldBlocks.emplace_back(i, j+20, k);
+				hfov = stof(value);
+				settingsChanged = true;
+			}
+			else if (key == "row")
+			{
+				row = stoi(value);
+				settingsChanged = true;
+			}
+			else if (key == "col")
+			{
+				col = stoi(value);
+				settingsChanged = true;
 			}
 		}
-	}*/
+		catch (const std::invalid_argument& e)
+		{
+			cerr << "Warning: Corrupted or invalid data in settings file for key: " << key << endl;
+		}
+		catch (const std::out_of_range& e)
+		{
+			cerr << "Warning: Value out of range in settings file for key: " << key << endl;
+		}
+	}
+	if (settingsChanged)
+	{
+		cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+		screen.assign(row, vector<char>(col, ' '));
+		screenpoints.assign(row, vector<bool>(col, false));
+	}
+	settings.close();
 
-	//placeHouse(-5, -5, 0);
+	ifstream models;
+	models.open("Models Positions.txt");
+	while (getline(models, line))
+	{
+		if (line.empty()) continue;
+		if (line.back() == '\r')
+		{
+			line.pop_back();
+		}
+		if (!(line[0] == 'm' && line[1] == ' '))
+		{
+			continue;
+		}
+
+		size_t delimiter_pos;
+
+		line = line.substr(2);
+		delimiter_pos = line.find(' ');
+		string name = line.substr(0, delimiter_pos);
+
+		line = line.substr(delimiter_pos + 1);
+		delimiter_pos = line.find(' ');
+		float x = stof(line.substr(0, delimiter_pos));
+
+		line = line.substr(delimiter_pos + 1);
+		delimiter_pos = line.find(' ');
+		float y = stof(line.substr(0, delimiter_pos));
+
+		line = line.substr(delimiter_pos + 1);
+		delimiter_pos = line.find(' ');
+		float z = stof(line.substr(0, delimiter_pos));
+
+		line = line.substr(delimiter_pos + 1);
+		delimiter_pos = line.find(' ');
+		float scale = stof(line.substr(0, delimiter_pos));
+
+		line = line.substr(delimiter_pos + 1);
+		char symbol = line[0];
+
+		try
+		{
+			spawnModel(name, x, y, z, scale, symbol);
+		}
+		catch (const std::invalid_argument& e)
+		{
+			cerr << "Warning: Corrupted or invalid data in the Models Positions file" << endl;
+		}
+	}
+	models.close();
+
+}
+
+void prepareWorld()
+{
+	
+	//spawnModel("HalfSphere.obj", 0, 0, 1.5, 1.0f, '#');
+	//spawnModel("Castle OBJ.obj", 0, 10, 0, 1.0f, '#');
+	//spawnModel("MapleTree.obj", 20, 20, 0, 1.0f, '#');
+	/*spawnModel("MapleTreeLeaves.obj", 20, 20, 0, 1.0f, '(');
+	spawnModel("MapleTreeStem.obj", 20, 20, 0, 1.0f, '#');*/
+
+	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
+	//for(int i = 1; i <= 5; i++) //HELLO
+	//{
+	//	worldBlocks.emplace_back(-5, 12, i);
+	//	worldBlocks.emplace_back(-2, 12, i);
+
+	//	worldBlocks.emplace_back(0, 12, i);
+
+	//	worldBlocks.emplace_back(5, 12, i);
+
+	//	worldBlocks.emplace_back(10, 12, i);
+	//}
+	//worldBlocks.emplace_back(-4, 12, 3);
+	//worldBlocks.emplace_back(-3, 12, 3);
+	//for (int i = 1; i <= 3; i++)
+	//{
+	//	worldBlocks.emplace_back(i, 12, 1);
+	//	worldBlocks.emplace_back(i, 12, 3);
+	//	worldBlocks.emplace_back(i, 12, 5);
+
+	//	worldBlocks.emplace_back(15, 12, i+1);
+
+	//	worldBlocks.emplace_back(18, 12, i+1);
+	//}
+	//for (int i = 6; i <= 13; i++)
+	//{
+	//	worldBlocks.emplace_back(i, 12, 1);
+	//	if (i == 8) i = 10;
+	//}
+	//worldBlocks.emplace_back(16, 12, 1);
+	//worldBlocks.emplace_back(17, 12, 1);
+	//worldBlocks.emplace_back(16, 12, 5);
+	//worldBlocks.emplace_back(17, 12, 5);
+
+	///*for (int i = 0; i < 8; i++)
+	//{
+	//	for (int j = 0; j < 8; j++)
+	//	{
+	//		for (int k = 0; k < 8; k++)
+	//		{
+	//			worldBlocks.emplace_back(i, j+20, k);
+	//		}
+	//	}
+	//}*/
+
+	/*placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
-	tree(-24, -7, 0);
+	tree(-24, -7, 0);*/
+}
+
+void action(char c)
+{
+	if (c == 'w') camera.move('f', 0.5);
+	else if (c == 's') camera.move('b', 0.5);
+	else if (c == 'a') camera.move('l', 0.5);
+	else if (c == 'd') camera.move('r', 0.5);
+
+	else if (c == ' ') camera.move('u', 0.5);
+	else if (c == 'v') camera.move('d', 0.5);
+
+	else if (c == 72) camera.cameramove('u', 5);
+	else if (c == 75) camera.cameramove('l', 5);
+	else if (c == 80) camera.cameramove('d', 5);
+	else if (c == 77) camera.cameramove('r', 5);
+
+	else if (c == 'r') system("cls");
+
+	else if (c == 'o') save();
+
+	else if (c == 'e') placeBlock();
+	else if (c == 'q') breakBlock();
 }
 
 int main()
 {
-	prepareWorld();
+	ios_base::sync_with_stdio(false);
+	cin.tie(NULL);
+	
 	load();
+	prepareWorld();
 	int inp;
 	while (1)
 	{

@@ -1,5 +1,0 @@
-camera.x=6.17578
-camera.y=-6.57892
-camera.z=4
-camera.yaw=0
-camera.pitch=84.9
