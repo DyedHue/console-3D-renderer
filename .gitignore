@@ -368,3 +368,9 @@ MigrationBackup/
 x64/Release/*
 
 !x64/Release/console 3D renderer.exe
+
+#Save text files
+
+Models Positions.txt
+Renderer Settings.txt
+Save File.txt
