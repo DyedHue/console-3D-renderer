@@ -23,7 +23,7 @@ const char ch = '*';
 //Helper functions {
 float toradian(float angle) { return ((angle * PI) / 180.0f); }
 bool fileExists(const std::string& name) {
-	std::ifstream f(name.c_str());
+	ifstream f(name.c_str());
 	return f.good();
 }
 // }
@@ -827,7 +827,7 @@ static void load()
 	if (!fileExists(filename))
 	{
 		ofstream outFile(filename);
-		outFile << "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View.The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+		outFile << "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 		outFile.close();
 	}
 
@@ -835,7 +835,7 @@ static void load()
 	if (!fileExists(filename))
 	{
 		ofstream outFile(filename);
-		outFile << "Include 3D models here (Only obj files are supported)\n\nHow to use :\nFirst type m. Then after a space, the name of the file (including \".obj\"), after a space, type the x, y and z coordinates(positive z is up) of your desired position to place the model at, each separated by space.\nAfter another space, type the scale of the object(1 means original size), after another space, type a character(8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nMore briefly: \"m {filename.obj} {x} {y} {z} {scale} {character}\"\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in(x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
+		outFile << "Include 3D models here (Only obj files are supported)\n\nHow to use :\nFirst type m. Then after a space, the name of the file (including \".obj\"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\nAfter another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nMore briefly: \"m {filename.obj} {x} {y} {z} {scale} {character}\"\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
 		outFile.close();
 	}
 
@@ -1033,10 +1033,10 @@ void prepareWorld()
 	//	}
 	//}*/
 
-	/*placeHouse(-5, -5, 0);
+	placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
-	tree(-24, -7, 0);*/
+	tree(-24, -7, 0);
 }
 
 void action(char c)

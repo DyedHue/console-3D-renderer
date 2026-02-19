@@ -12,13 +12,13 @@ You can press o to save your current position and look direction which will be l
 Go to Models Positions.txt (which will be automatically created if you run the exe once, alternatively, you can create it yourself).  
 You can import 3d models as .obj files only.  
 
-First type m. Then after a space, the name of the file (including ".obj"), after a space, type the x, y and z coordinates(positive z is up) of your desired position to place the model at, each separated by space.  
-After another space, type the scale of the object(1 means original size), after another space, type a character(8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.  
+First type m. Then after a space, the name of the file (including ".obj"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.  
+After another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.  
 You can include 1 model in one line. Any line works.  
   
 More briefly: "m {filename.obj} {x} {y} {z} {scale} {character}"  
   
-For example : "m MyModel.obj 0 3.5 2.89 2 #" (without the strings) is going to place an object in(x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.  
+For example : "m MyModel.obj 0 3.5 2.89 2 #" (without the strings) is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.  
   
 # How to change settings:
 Go to Settings.txt (which will be automatically created if you run the exe once, alternatively, you can create it yourself).  
