@@ -26,6 +26,12 @@ bool fileExists(const std::string& name) {
 	ifstream f(name.c_str());
 	return f.good();
 }
+void setCursorPosition(int x, int y)
+{
+	static const HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	COORD coord = { (SHORT)x, (SHORT)y };
+	SetConsoleCursorPosition(hOut, coord);
+}
 // }
 
 
@@ -44,12 +50,18 @@ public:
 	}
 };
 
-void setCursorPosition(int x, int y)
+class point //point on projection plane
 {
-	static const HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	COORD coord = { (SHORT)x, (SHORT)y };
-	SetConsoleCursorPosition(hOut, coord);
-}
+public:
+	int x, y;
+
+	point() : x(0), y(0) {}
+
+	point(int X, int Y)
+	{
+		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
+	}
+};
 
 class Camera
 {
@@ -244,19 +256,6 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-class point //point on projection plane
-{
-public:
-	int x, y;
-
-	point() : x(0), y(0) {}
-
-	point(int X, int Y)
-	{
-		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
-	}
-};
-
 void screenSet(int x, int y, char c = ch)
 {
 	int _row, _col;
@@ -439,6 +438,10 @@ void printTriangle(point &point1, point &point2, point &point3, char c = ch)
 						screen[i][count] = c;
 					}
 					j = it - 1;
+				}
+				else
+				{
+					screen[i][j] = c;
 				}
 			}
 		}
