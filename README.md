@@ -9,8 +9,8 @@ Use wasd to move around, arrow keys to look around, space for going up, v for go
 You can press o to save your current position and look direction which will be loaded the next time you run the exe.
 
 # How to import models:
+You can import 3d models as .obj files only. Keep your obj file in the same directory as the exe.  
 Go to Models Positions.txt (which will be automatically created if you run the exe once, alternatively, you can create it yourself).  
-You can import 3d models as .obj files only.  
 
 First type m. Then after a space, the name of the file (including ".obj"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.  
 After another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.  
