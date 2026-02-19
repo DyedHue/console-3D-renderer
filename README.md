@@ -1,7 +1,7 @@
 <img width="1919" height="1028" alt="Screenshot 2026-02-19 002325" src="https://github.com/user-attachments/assets/c628e9d1-566b-4da8-b897-045a7fb9a1f5" />
 
 # How to use:
-Go to [Source.cpp](Source.cpp), copy the entire file, compile it to an exe or download the [consode 3D renderer.exe](x64/Release/console%203D%20renderer.exe) directly from here. Do not download exe files from anywhere untrustworthy on the internet.  
+Go to [Source.cpp](Source.cpp), copy the entire file, compile it to an exe or download the [console 3D renderer.exe](x64/Release/console%203D%20renderer.exe) directly from here. Do not download exe files from anywhere untrustworthy on the internet.  
   
 After running it, use control and scroll bar or +/- to adjust font size to make the screen fully visible.   
   
