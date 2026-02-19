@@ -127,7 +127,7 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="Models Positions.txt" />
-    <Text Include="Render Settings.txt" />
+    <Text Include="Renderer Settings.txt" />
     <Text Include="Save File.txt" />
   </ItemGroup>
   <ItemGroup>
