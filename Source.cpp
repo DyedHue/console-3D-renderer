@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <vector>
 #include <cmath>
 #include <conio.h>
@@ -325,7 +325,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 	y1 = point1.x;
 	y2 = point2.x;
 	
-	if (x1 == x2 && y1 == y2) return 1;
+	if (x1 == x2 && y1 == y2) return;
 
 	if (x1 == x2)
 	{
