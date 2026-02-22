@@ -11,7 +11,7 @@ using namespace std;
 
 const float PI = 3.1415926535f;
 int row = 100;
-int col = 220;
+int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
 float cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 
@@ -35,7 +35,18 @@ void setCursorPosition(int x, int y)
 // }
 
 
+class point //point on projection plane
+{
+public:
+	int x, y;
 
+	point() : x(0), y(0) {}
+
+	point(int X, int Y)
+	{
+		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
+	}
+};
 class point3d
 {
 public:
@@ -47,19 +58,6 @@ public:
 	bool operator==(const point3d& other) const
 	{
 		return (x == other.x && y == other.y && z == other.z);
-	}
-};
-
-class point //point on projection plane
-{
-public:
-	int x, y;
-
-	point() : x(0), y(0) {}
-
-	point(int X, int Y)
-	{
-		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
 	}
 };
 
@@ -147,6 +145,19 @@ public:
 			}
 		}
 	}
+	point3d unitVector()
+	{
+		float normalyaw = toradian(90 + (360 - yaw));
+		float normalpitch = toradian(pitch);
+
+		float sinp = sin(normalpitch);
+
+		float x = sinp * cos(normalyaw);
+		float y = sinp * sin(normalyaw);
+		float z = cos(normalpitch);
+
+		return { x, y, z };
+	}
 };
 Camera camera;
 
@@ -156,7 +167,6 @@ struct TriangleToRender
 	char symbol;
 	float avg_dist;
 };
-
 vector<TriangleToRender> queue;
 
 class Model
@@ -248,7 +258,6 @@ public:
 	}
 };
 vector<Model> sceneModels;
-
 void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, char symbol = '#')
 {
 	Model m;
@@ -256,7 +265,7 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-void screenSet(int x, int y, char c = ch)
+void screenSetConv(int x, int y, char c = ch)
 {
 	int _row, _col;
 	_row = row / 2 - y;
@@ -264,7 +273,7 @@ void screenSet(int x, int y, char c = ch)
 	if (_row < row && _row >= 0 && _col < col && _col >= 0)
 		screen[_row][_col] = c;
 }
-void screenPointSet(int x, int y)
+void screenPointSetConv(int x, int y)
 {
 	int _row, _col;
 	_row = row / 2 - y;
@@ -273,139 +282,97 @@ void screenPointSet(int x, int y)
 		screenpoints[_row][_col] = 1;
 }
 
-void pointConnect(point &point1, point &point2, bool show = 0)
+void screenSet(int x, int y, char c = ch)
 {
-	float x1, y1, x2, y2;
-	x1 = point1.y - (col % 2 ? (col - 1) / 2 : col / 2);
-	x2 = point2.y - (col % 2 ? (col - 1) / 2 : col / 2);
-	y1 = (row % 2 ? (row - 1) / 2 : row / 2) - point1.x;
-	y2 = (row % 2 ? (row - 1) / 2 : row / 2) - point2.x;
+	int _row = y, _col = x;
 
-	if (x1 == x2 && y1 == y2)
+	if (_row < row && _row >= 0 && _col < col && _col >= 0)
 	{
+		screen[_row][_col] = c;
+	}
+}
+void screenPointSet(int x, int y, bool clamp = 1)
+{
+	int _row = y, _col = x;
+
+	if (_row < row && _row >= 0 && _col < col && _col >= 0)
+	{
+		screenpoints[_row][_col] = 1;
 		return;
 	}
-	if (x1 == x2)
+	if (clamp)
 	{
-		if (y1 < y2)
+		if (_row < row && _row >= 0)
 		{
-			for (int i = y1; i <= y2; i++)
+			if (_col < 0)
 			{
-				if (show)
-				{
-					screenSet(x1, i);
-				}
-				screenPointSet(x1, i);
+				screenpoints[_row][0] = 1;
 			}
-		}
-		else if (y2 < y1)
-		{
-			for (int i = y2; i <= y1; i++)
+			else if (_col >= col)
 			{
-				if (show)
-				{
-					screenSet(x1, i);
-				}
-				screenPointSet(x1, i);
-			}
-		}
-	}
-	else if (y1 == y2)
-	{
-		if (x1 < x2)
-		{
-			for (int i = x1; i <= x2; i++)
-			{
-				if (show)
-				{
-					screenSet(i, y1);
-				}
-				screenPointSet(i, y1);
-			}
-		}
-		else if (x2 < x1)
-		{
-			for (int i = x2; i <= x1; i++)
-			{
-				if (show)
-				{
-					screenSet(i, y1);
-				}
-				screenPointSet(i, y1);
-			}
-		}
-	}
-
-	else
-	{
-		float m = (y2 - y1) / (x2 - x1);
-		float c = y1 - m * x1;
-		if (m <= 1 && m >= -1)
-		{
-			float y;
-			if (x1 < x2)
-			{
-				for (int i = x1; i <= x2; i++)
-				{
-					y = m * i + c;
-					y = round(y);
-
-					if (show)
-					{
-						screenSet(i, y);
-					}
-					screenPointSet(i, y);
-				}
-			}
-			else if (x2 < x1)
-			{
-				for (int i = x2; i <= x1; i++)
-				{
-					y = m * i + c;
-					y = round(y);
-
-					if (show)
-					{
-						screenSet(i, y);
-					}
-					screenPointSet(i, y);
-				}
-			}
-		}
-		else
-		{
-			float x;
-			if (y1 < y2)
-			{
-				for (int i = y1; i <= y2; i++)
-				{
-					x = (i - c) / m;
-					x = round(x);
-
-					if (show) screenSet(x, i);
-
-					screenPointSet(x, i);
-				}
-			}
-			else if (y2 < y1)
-			{
-				for (int i = y2; i <= y1; i++)
-				{
-					x = (i - c) / m;
-					x = round(x);
-
-					if (show)
-					{
-						screenSet(x, i);
-					}
-					screenPointSet(x, i);
-				}
+				screenpoints[_row][col - 1] = 1;
 			}
 		}
 	}
 }
 
-void printTriangle(point &point1, point &point2, point &point3, char c = ch)
+void pointConnect(const point &point1, const point &point2, bool show = 0)
+{
+	float x1, y1, x2, y2;
+
+	x1 = point1.y;
+	x2 = point2.y;
+	y1 = point1.x;
+	y2 = point2.x;
+	
+	if (x1 == x2 && y1 == y2) return 1;
+
+	if (x1 == x2)
+	{
+		for (int i = min(y1, y2); i <= max(y1, y2); i++)
+		{
+			screenPointSet(x1, i);
+			if (show) screenSet(x1, i);
+		}
+	}
+	else if (y1 == y2)
+	{
+		for (int i = min(x1, x2); i <= max(x1, x2); i++)
+		{
+			screenPointSet(i, y1);
+			if (show) screenSet(i, y1);
+		}
+	}
+	else
+	{
+		float m = (y2 - y1) / (x2 - x1);
+		float minv = 1 / m;
+		float c = y1 - m * x1;
+
+		if (-1 <= m && m <= 1)
+		{
+			for (int i = min(x1, x2); i <= max(x1, x2); i++)
+			{
+				int y = round(m * i + c);
+
+				screenPointSet(i, y);
+				if (show) screenSet(i, y);
+			}
+		}
+		else
+		{
+			for (int i = min(y1, y2); i <= max(y1, y2); i++)
+			{
+				int x = round(minv * (i - c));
+
+				screenPointSet(x, i);
+				if (show) screenSet(x, i);
+			}
+		}
+	}
+}
+
+void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch)
 {
 	for (auto& rowVec : screenpoints)
 		fill(rowVec.begin(), rowVec.end(), false);
@@ -448,15 +415,10 @@ void printTriangle(point &point1, point &point2, point &point3, char c = ch)
 	}
 }
 
-int project3d(point3d &pointa, char c)
+int project3d(const point3d &pointa, char c)
 {
-	float _col = ((cameratoScreen / pointa.y) * pointa.x) + col / 2.0f;
-	float _row = ((cameratoScreen / pointa.y) * -pointa.z) + row / 2.0f;
-
-	if (c == 'x')
-		return (_col - (col / 2.0f));
-	else if (c == 'y')
-		return((row / 2.0f) - _row);
+	if      (c == 'x') return cameratoScreen * (pointa.x / pointa.y); //col
+	else if (c == 'y') return cameratoScreen * (pointa.z / pointa.y); //row
 }
 point3d transformtoCamSpace(const point3d &w)
 {
@@ -479,35 +441,29 @@ point3d transformtoCamSpace(const point3d &w)
 
 	return point3d(yawedx, pitchedy, pitchedz);
 }
-
 void renderTriangle3d(const TriangleToRender& tri)
 {
-	point3d cama = transformtoCamSpace(tri.p1);
-	point3d camb = transformtoCamSpace(tri.p2);
-	point3d camc = transformtoCamSpace(tri.p3);
-
 	float near_plane = 0.1f;
-	if (cama.y < near_plane || camb.y < near_plane || camc.y < near_plane)
+	if (tri.p1.y < near_plane || tri.p2.y < near_plane || tri.p3.y < near_plane)
 		return;
 
-	point point1(project3d(cama, 'x'), project3d(cama, 'y'));
-	point point2(project3d(camb, 'x'), project3d(camb, 'y'));
-	point point3(project3d(camc, 'x'), project3d(camc, 'y'));
+	point point1(project3d(tri.p1, 'x'), project3d(tri.p1, 'y'));
+	point point2(project3d(tri.p2, 'x'), project3d(tri.p2, 'y'));
+	point point3(project3d(tri.p3, 'x'), project3d(tri.p3, 'y'));
 
 	printTriangle(point1, point2, point3, tri.symbol);
 }
 
 void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch)
 {
-	TriangleToRender tri;
-	tri.p1 = pointa;
-	tri.p2 = pointb;
-	tri.p3 = pointc;
-	tri.symbol = c;
-
+	TriangleToRender tri = {pointa, pointb, pointc, c};
 	queue.push_back(tri);
 }
-
+void addFace3d(point3d pointa, point3d pointb, point3d pointc, point3d pointd, char c = ch)
+{
+	addTriangle3d(pointa, pointb, pointc, c);
+	addTriangle3d(pointc, pointd, pointa, c);
+}
 class block
 {
 public:
@@ -518,13 +474,14 @@ public:
 	{
 		point3d a(o.x, o.y, o.z);
 		point3d b(o.x + 1, o.y, o.z);
-		point3d c(o.x, o.y, o.z + 1);
-		point3d d(o.x + 1, o.y, o.z + 1);
+		point3d c(o.x + 1, o.y, o.z + 1);
+		point3d d(o.x, o.y, o.z + 1);
+
 		point3d e(o.x, o.y + 1, o.z);
 		point3d f(o.x + 1, o.y + 1, o.z);
-		point3d g(o.x, o.y + 1, o.z + 1);
-		point3d h(o.x + 1, o.y + 1, o.z + 1);
-		
+		point3d g(o.x + 1, o.y + 1, o.z + 1);
+		point3d h(o.x, o.y + 1, o.z + 1);
+
 		bool backmatched = 0, bottommatched = 0, leftmatched = 0, rightmatched = 0, topmatched = 0, frontmatched = 0;
 		/*for (int i = 0; i < queue.size(); i++)
 		{
@@ -565,53 +522,54 @@ public:
 				i--;
 			}
 		}*/
-		if(!frontmatched)
+		if (!frontmatched)
 		{
-			addTriangle3d(g, h, e);    //back
-			addTriangle3d(e, h, f);
+			addFace3d(e, f, g, h); //back
 		}
 		if (!topmatched)
 		{
-			addTriangle3d(e, f, a, '.');     //bottom
-			addTriangle3d(f, a, b, '.');
+			addFace3d(a, b, f, e, '.');     //bottom
 		}
 		if (!rightmatched)
 		{
-			addTriangle3d(a, c, e, '#');    //left
-			addTriangle3d(c, e, g, '#');
+			addFace3d(a, d, h, e, '#');    //left
 		}
 		if (!leftmatched)
 		{
-			addTriangle3d(h, f, d, '#');    //right
-			addTriangle3d(d, f, b, '#');
+			addFace3d(b, c, g, f, '#');    //right
 		}
 		if (!bottommatched)
 		{
-			addTriangle3d(g, c, h, '@');    //top
-			addTriangle3d(c, h, d, '@');
+			addFace3d(c, d, h, g, '@'); // top
 		}
 		if (!backmatched)
 		{
-			addTriangle3d(a, b, c);    //front
-			addTriangle3d(b, c, d);
+			addFace3d(a, b, c, d);    //front
 		}
 	}
 };
 vector<block> worldBlocks;
 
-
-point3d unitvectorcamera()
+void render()
 {
-	float normalyaw = toradian(90+(360 - camera.yaw));
-	float normalpitch = toradian(camera.pitch);
-	
-	float sinp = sin(normalpitch);
+	for (auto& blocks : worldBlocks) blocks.add();
+	for (auto& model : sceneModels) model.addToScene();
 
-	float x = sinp * cos(normalyaw);
-	float y = sinp * sin(normalyaw);
-	float z = cos(normalpitch);
+	for (auto& tri : queue)
+	{
+		tri.p1 = transformtoCamSpace(tri.p1);
+		tri.p2 = transformtoCamSpace(tri.p2);
+		tri.p3 = transformtoCamSpace(tri.p3);
+		tri.avg_dist = (tri.p1.y + tri.p2.y + tri.p3.y) / 3.0f;
+	}
 
-	return { x, y, z };
+	sort(queue.begin(), queue.end(), [](const TriangleToRender& a, const TriangleToRender& b)
+										{
+											return a.avg_dist > b.avg_dist;
+										}
+	);
+
+	for (const auto& tri : queue) renderTriangle3d(tri);
 }
 
 struct raycastResult
@@ -619,10 +577,9 @@ struct raycastResult
 	int blockindex = -1;
 	point3d placepos;
 };
-
 raycastResult raycast(bool tobreak = 0)
 {
-	point3d unitvect = unitvectorcamera();
+	point3d unitvect = camera.unitVector();
 
 	point3d currentpos = { camera.x, camera.y, camera.z };
 	point3d emptypos = currentpos;
@@ -665,152 +622,12 @@ void placeBlock()
 
 	worldBlocks.emplace_back(x, y, z);
 }
-
 void breakBlock()
 {
 	raycastResult result = raycast(1);
 	if (result.blockindex == -1) return;
 
 	worldBlocks.erase(worldBlocks.begin() + result.blockindex);
-}
-
-
-void show()
-{
-	screen[row / 2][col / 2] = 'O';
-	setCursorPosition(0, 0);
-
-	string fullFrame = "";
-	fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
-	for (int i = 0; i < col * 2 + 1; i++)
-		fullFrame += "_";
-	fullFrame += "\n";
-
-	for (int i = 0; i < row; i++)
-	{
-		fullFrame += "|";
-		for (int j = 0; j < col; j++)
-		{
-			fullFrame += screen[i][j];
-			fullFrame += ' ';
-		}
-		fullFrame += "|\n";
-	}
-	for (int i = 0; i < col * 2 + 1; i++)
-		fullFrame += "_";
-
-	printf("%s", fullFrame.c_str());
-	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch
-		<< "                                        \n";
-
-
-	for (auto& rowVec : screen)
-		fill(rowVec.begin(), rowVec.end(), ' ');
-}
-
-
-void road()
-{
-	/*point3d pointa; pointa.set(10, 50, -5);
-	point3d pointb; pointb.set(-10, 50, -5);*/
-
-	point3d pointc(10, -9, -5);
-	point3d pointd(-10, -9, -5);
-	point3d pointe(10, -3, -5);
-	point3d pointf(-10, -3, -5);
-
-	addTriangle3d(pointc, pointd, pointe, '@');
-	addTriangle3d(pointd, pointe, pointf, '@');
-}
-
-void placeHouse(float x, float y, float z)
-{
-	for (int i = 0; i <= 4; i++)
-	{
-		for (int j = 3; j >= 0; j--)
-		{
-			worldBlocks.emplace_back(x + i, y + -1 * 4, z + j);
-			if (i == 2 && (j == 1 || j == 0))
-				continue;
-			worldBlocks.emplace_back(x + i, y, z + j);
-		}
-	}
-	for (int i = -1; i >= -3; i--)
-	{
-		for (int j = 3; j >= 0; j--)
-		{
-			worldBlocks.emplace_back(x, y + i, z + j);
-			worldBlocks.emplace_back(x + 4, y + i, z + j);
-		}
-	}
-
-	for (int i = -5; i <= 1; i++)
-		worldBlocks.emplace_back(x - 1, y + i, z + 4),
-		worldBlocks.emplace_back(x + 5, y + i, z + 4);
-	for (int i = 0; i <= 4; i++)
-		worldBlocks.emplace_back(x + i, y - 5, z + 4),
-		worldBlocks.emplace_back(x + i, y + 1, z + 4);
-	for(int i = -4; i <= 0; i++)
-		worldBlocks.emplace_back(x, y + i, z + 5),
-		worldBlocks.emplace_back(x+4, y + i, z + 5);
-	for(int i = 1; i<= 3; i++)
-		worldBlocks.emplace_back(x + i, y - 4, z + 5),
-		worldBlocks.emplace_back(x + i, y, z + 5),
-		worldBlocks.emplace_back(x + i, y - 3, z + 6),
-		worldBlocks.emplace_back(x + i, y - 1, z + 6);
-
-	worldBlocks.emplace_back(x + 3, y - 2, z + 6);
-	worldBlocks.emplace_back(x + 1, y - 2, z + 6);
-
-	worldBlocks.emplace_back(x + 2, y - 2, z + 7);
-}
-
-void tree(float x, float y, float z)
-{
-	for (int i = 0; i < 4; i++)
-		worldBlocks.emplace_back(x, y, z+i);
-
-	for(int i = -2; i <= 2; i++)
-		for(int j = -2; j <= 2; j++)
-			worldBlocks.emplace_back(x+i, y+j, z+4);
-
-	for (int i = -1; i <= 1; i++)
-		for (int j = -1; j <= 1; j++)
-			worldBlocks.emplace_back(x + i, y + j, z+5);
-
-	worldBlocks.emplace_back(x, y, z + 6);
-}
-
-void render()
-{
-	for (int i = 0; i < worldBlocks.size(); i++)
-	{
-		worldBlocks[i].add();
-	}
-
-	for (auto& model : sceneModels)
-	{
-		model.addToScene();
-	}
-
-	for (auto& tri : queue)
-	{
-		point3d p1_cam = transformtoCamSpace(tri.p1);
-		point3d p2_cam = transformtoCamSpace(tri.p2);
-		point3d p3_cam = transformtoCamSpace(tri.p3);
-		tri.avg_dist = (p1_cam.y + p2_cam.y + p3_cam.y) / 3.0f;
-	}
-
-	sort(queue.begin(), queue.end(), [](const TriangleToRender& a, const TriangleToRender& b)
-										{
-											return a.avg_dist > b.avg_dist;
-										}
-	);
-
-	for (const auto& tri : queue)
-	{
-		renderTriangle3d(tri);
-	}
 }
 
 static void save()
@@ -890,7 +707,7 @@ static void load()
 		{
 			line.pop_back();
 		}
-		if(line[0] == '#') continue;
+		if (line[0] == '#') continue;
 
 		size_t delimiter_pos = line.find('=');
 		string key = line.substr(0, delimiter_pos);
@@ -909,7 +726,7 @@ static void load()
 			}
 			else if (key == "col")
 			{
-				col = stoi(value);
+				col = stoi(value) + 2; //adjusting the desired column number to actual column number as 2 colums on the sides are not displayed
 				settingsChanged = true;
 			}
 		}
@@ -979,7 +796,144 @@ static void load()
 		}
 	}
 	models.close();
+}
 
+void show()
+{
+	screen[row / 2][col / 2] = 'O';
+	setCursorPosition(0, 0);
+
+	string fullFrame = "";
+	fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
+	for (int i = 0; i < col * 2 - 2; i++)
+		fullFrame += "_";
+	fullFrame += "\n";
+
+	for (int i = 0; i < row; i++)
+	{
+		fullFrame += "|";
+		for (int j = 1; j < col - 1; j++)
+		{
+			fullFrame += screen[i][j];
+			fullFrame += ' ';
+		}
+		fullFrame += "|\n";
+	}
+	for (int i = 0; i < col * 2 - 2; i++)
+		fullFrame += "_";
+
+	printf("%s", fullFrame.c_str());
+	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch
+		<< "                                        \n";
+
+
+	for (auto& rowVec : screen)
+		fill(rowVec.begin(), rowVec.end(), ' ');
+}
+
+void road()
+{
+	/*point3d pointa; pointa.set(10, 50, -5);
+	point3d pointb; pointb.set(-10, 50, -5);*/
+
+	point3d pointc(10, -9, -5);
+	point3d pointd(-10, -9, -5);
+	point3d pointe(10, -3, -5);
+	point3d pointf(-10, -3, -5);
+
+	addTriangle3d(pointc, pointd, pointe, '@');
+	addTriangle3d(pointd, pointe, pointf, '@');
+}
+void placeHouse(float x, float y, float z)
+{
+	for (int i = 0; i <= 4; i++)
+	{
+		for (int j = 3; j >= 0; j--)
+		{
+			worldBlocks.emplace_back(x + i, y + -1 * 4, z + j);
+			if (i == 2 && (j == 1 || j == 0))
+				continue;
+			worldBlocks.emplace_back(x + i, y, z + j);
+		}
+	}
+	for (int i = -1; i >= -3; i--)
+	{
+		for (int j = 3; j >= 0; j--)
+		{
+			worldBlocks.emplace_back(x, y + i, z + j);
+			worldBlocks.emplace_back(x + 4, y + i, z + j);
+		}
+	}
+
+	for (int i = -5; i <= 1; i++)
+		worldBlocks.emplace_back(x - 1, y + i, z + 4),
+		worldBlocks.emplace_back(x + 5, y + i, z + 4);
+	for (int i = 0; i <= 4; i++)
+		worldBlocks.emplace_back(x + i, y - 5, z + 4),
+		worldBlocks.emplace_back(x + i, y + 1, z + 4);
+	for(int i = -4; i <= 0; i++)
+		worldBlocks.emplace_back(x, y + i, z + 5),
+		worldBlocks.emplace_back(x+4, y + i, z + 5);
+	for(int i = 1; i<= 3; i++)
+		worldBlocks.emplace_back(x + i, y - 4, z + 5),
+		worldBlocks.emplace_back(x + i, y, z + 5),
+		worldBlocks.emplace_back(x + i, y - 3, z + 6),
+		worldBlocks.emplace_back(x + i, y - 1, z + 6);
+
+	worldBlocks.emplace_back(x + 3, y - 2, z + 6);
+	worldBlocks.emplace_back(x + 1, y - 2, z + 6);
+
+	worldBlocks.emplace_back(x + 2, y - 2, z + 7);
+}
+void tree(float x, float y, float z)
+{
+	for (int i = 0; i < 4; i++)
+		worldBlocks.emplace_back(x, y, z+i);
+
+	for(int i = -2; i <= 2; i++)
+		for(int j = -2; j <= 2; j++)
+			worldBlocks.emplace_back(x+i, y+j, z+4);
+
+	for (int i = -1; i <= 1; i++)
+		for (int j = -1; j <= 1; j++)
+			worldBlocks.emplace_back(x + i, y + j, z+5);
+
+	worldBlocks.emplace_back(x, y, z + 6);
+}
+void showHello(float x = 0, float y = 0, float z = 0)
+{
+	for (int i = 0; i <= 4; i++)
+	{
+		worldBlocks.emplace_back(x, y, z + i);
+		worldBlocks.emplace_back(x + 3, y, z + i);
+
+		worldBlocks.emplace_back(x + 5, y, z + i);
+
+		worldBlocks.emplace_back(x + 10, y, z + i);
+
+		worldBlocks.emplace_back(x + 15, y, z + i);
+	}
+	worldBlocks.emplace_back(x + 1, y, z + 2);
+	worldBlocks.emplace_back(x + 2, y, z + 2);
+	for (int i = 1; i <= 3; i++)
+	{
+		worldBlocks.emplace_back(x + i + 5, y, z);
+		worldBlocks.emplace_back(x + i + 5, y, z + 2);
+		worldBlocks.emplace_back(x + i + 5, y, z + 4);
+
+		worldBlocks.emplace_back(x + 20, y, z + i);
+
+		worldBlocks.emplace_back(x + 23, y, z + i);
+	}
+	for (int i = 6; i <= 13; i++)
+	{
+		worldBlocks.emplace_back(x + i + 5, y, z);
+		if (i == 8) i = 10;
+	}
+	worldBlocks.emplace_back(x + 21, y, z);
+	worldBlocks.emplace_back(x + 22, y, z);
+	worldBlocks.emplace_back(x + 21, y, z + 4);
+	worldBlocks.emplace_back(x + 22, y, z + 4);
 }
 
 void prepareWorld()
@@ -992,54 +946,12 @@ void prepareWorld()
 	spawnModel("MapleTreeStem.obj", 20, 20, 0, 1.0f, '#');*/
 
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
-	//for(int i = 1; i <= 5; i++) //HELLO
-	//{
-	//	worldBlocks.emplace_back(-5, 12, i);
-	//	worldBlocks.emplace_back(-2, 12, i);
-
-	//	worldBlocks.emplace_back(0, 12, i);
-
-	//	worldBlocks.emplace_back(5, 12, i);
-
-	//	worldBlocks.emplace_back(10, 12, i);
-	//}
-	//worldBlocks.emplace_back(-4, 12, 3);
-	//worldBlocks.emplace_back(-3, 12, 3);
-	//for (int i = 1; i <= 3; i++)
-	//{
-	//	worldBlocks.emplace_back(i, 12, 1);
-	//	worldBlocks.emplace_back(i, 12, 3);
-	//	worldBlocks.emplace_back(i, 12, 5);
-
-	//	worldBlocks.emplace_back(15, 12, i+1);
-
-	//	worldBlocks.emplace_back(18, 12, i+1);
-	//}
-	//for (int i = 6; i <= 13; i++)
-	//{
-	//	worldBlocks.emplace_back(i, 12, 1);
-	//	if (i == 8) i = 10;
-	//}
-	//worldBlocks.emplace_back(16, 12, 1);
-	//worldBlocks.emplace_back(17, 12, 1);
-	//worldBlocks.emplace_back(16, 12, 5);
-	//worldBlocks.emplace_back(17, 12, 5);
-
-	///*for (int i = 0; i < 8; i++)
-	//{
-	//	for (int j = 0; j < 8; j++)
-	//	{
-	//		for (int k = 0; k < 8; k++)
-	//		{
-	//			worldBlocks.emplace_back(i, j+20, k);
-	//		}
-	//	}
-	//}*/
-
+	
+	/*showHello(-40, 12, 0);
 	placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
-	tree(-24, -7, 0);
+	tree(-24, -7, 0);*/
 }
 
 void action(char c)
@@ -1081,8 +993,7 @@ int main()
 		while (1)
 		{
 			inp = _getch();
-			if (find(validInputsMap.begin(), validInputsMap.end(), inp) != validInputsMap.end())
-				break;
+			if (find(validInputsMap.begin(), validInputsMap.end(), inp) != validInputsMap.end()) break;
 		}
 		action(inp);
 	}
