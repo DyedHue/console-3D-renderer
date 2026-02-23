@@ -15,10 +15,15 @@ int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
 float cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 
-vector<char> validInputsMap = { 'w', 'a', 's', 'd', ' ', 'v', 72, 80, 75, 77, 'r', 'o' , 'e', 'q'};
+const vector<char> validInputsMap = { 'w', 'a', 's', 'd', ' ', 'v', 72, 80, 75, 77, 'r', 'o' , 'e', 'q'};
 vector<vector<char>> screen(row, vector<char>(col, ' '));
 vector<vector<bool>> screenpoints(row, vector<bool>(col, 0));
+const string brightnessSymbols = ".:-=+*#%@";
 const char ch = '*';
+
+const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+const string defaultModelspositionsText = "Include 3D models here (Only obj files are supported)\n\nHow to use :\nFirst type m. Then after a space, the name of the file (including \".obj\"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\nAfter another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nMore briefly: \"m {filename.obj} {x} {y} {z} {scale} {character}\"\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
+
 
 //Helper functions {
 float toradian(float angle) { return ((angle * PI) / 180.0f); }
@@ -33,7 +38,6 @@ void setCursorPosition(int x, int y)
 	SetConsoleCursorPosition(hOut, coord);
 }
 // }
-
 
 class point //point on projection plane
 {
@@ -55,11 +59,38 @@ public:
 	point3d(){x = 0, y = 0, z = 0;}
 	point3d(float X, float Y, float Z){x = X, y = Y, z = Z;}
 
+	point3d(int X, int Y, int Z) : x(X), y(Y), z(Z) {}
+
 	bool operator==(const point3d& other) const
 	{
 		return (x == other.x && y == other.y && z == other.z);
 	}
+
+	float operator*(const point3d& other) const //dot product (considering vectors)
+	{
+		return x * other.x + y * other.y + z * other.z;
+	}
+	point3d operator+(const point3d& other) const //adding two vectors
+	{
+		return point3d(x + other.x, y + other.y, z + other.z);
+	}
+
+	point3d operator*(const float& mag) const //multiplying a vector by a scalar (considering vectors)
+	{
+		return point3d(x * mag, y * mag, z * mag);
+	}
+	point3d normalized() const//use if you treat a point3d as a vector3
+	{
+		float l = sqrt(x * x + y * y + z * z);
+		if (l != 0)
+		{
+			return point3d(x / l, y / l, z / l);
+		}
+		return point3d(0, 0, 0);
+	}
 };
+
+point3d lightdir = point3d(1, 1, -1);
 
 class Camera
 {
@@ -161,11 +192,19 @@ public:
 };
 Camera camera;
 
-struct TriangleToRender
+class TriangleToRender
 {
+public:
 	point3d p1, p2, p3;
 	char symbol;
+	point3d avgNor = { 0, 0, 1 };
 	float avg_dist;
+	point3d n1 = { 0, 0, 1 }, n2 = { 0, 0, 1 }, n3 = { 0, 0, 1 };
+
+	void setAvgNormal()
+	{
+		avgNor = (n1 + n2 + n3) * (1.0f / 3.0f);
+	}
 };
 vector<TriangleToRender> queue;
 
@@ -174,18 +213,18 @@ class Model
 public:
 	vector<TriangleToRender> meshTriangles;
 
-	// Helper to apply scale and position offset
 	point3d transform(point3d p, float scale, float offX, float offY, float offZ)
 	{
 		return point3d(p.x * scale + offX, p.y * scale + offY, p.z * scale + offZ);
 	}
 
-
-
 	void load(string filename, float x, float y, float z, float scale = 1.0f, char symbol = '#')
 	{
 		meshTriangles.clear();
+		
 		vector<point3d> tempVertices;
+		vector<point3d> Normals;
+
 		ifstream file(filename);
 
 		if (!file.is_open())
@@ -201,52 +240,76 @@ public:
 			string type;
 			ss >> type;
 
-			if (type == "v") // Vertex
+			if (type == "v")
 			{
 				float vx, vy, vz;
 				ss >> vx >> vz >> vy;
-				//switching y and z for compatibility
-				tempVertices.push_back(point3d(vx, vy, vz));
+				tempVertices.push_back(point3d(vx, vy, vz)); //switching y and z for compatibility
 			}
-			else if (type == "f") // Face
+			if (type == "vn")
+			{
+				float nx, ny, nz;
+				ss >> nx >> nz >> ny;
+				Normals.push_back(point3d(nx, ny, nz)); //switching y and z for compatibility
+			}
+			else if (type == "f")
 			{
 				vector<int> vertexIndices;
+				vector<int> normalIndices;
 				string segment;
 
-				// Parse indices (e.g., "1/2/3" or "1//3" or "1")
+				// Parse indices ("1" "1/2" "1/2/3" "1//3")
 				while (ss >> segment)
 				{
-					// Find the first slash to isolate the vertex index
-					size_t slashPos = segment.find('/');
-					string indexStr = (slashPos != string::npos) ? segment.substr(0, slashPos) : segment;
+					size_t slashPos1 = segment.find('/');
+					int index, normal;
+					if (slashPos1 == string::npos)
+					{
+						index = stoi(segment);
+					}
+					else
+					{
+						index = stoi(segment.substr(0, slashPos1));
+						size_t slashPos2 = segment.find('/', slashPos1 + 1);
+						if (slashPos2 != string::npos)
+						{
+							normal = stoi(segment.substr(slashPos2 + 1));
+						}
+					}
 
-					// OBJ indices are 1-based, convert to 0-based
-					vertexIndices.push_back(stoi(indexStr) - 1);
+					vertexIndices.push_back(index - 1);
+					normalIndices.push_back(normal - 1);
 				}
 
-				// Triangulate the face (handles triangles and quads)
+				// Triangulate the face (any n gon works)
 				// Creates a triangle fan: (0, 1, 2), (0, 2, 3), etc.
 				for (size_t i = 1; i < vertexIndices.size() - 1; ++i)
 				{
 					TriangleToRender tri;
 
-					// Get raw vertices
 					point3d p1Raw = tempVertices[vertexIndices[0]];
 					point3d p2Raw = tempVertices[vertexIndices[i]];
 					point3d p3Raw = tempVertices[vertexIndices[i + 1]];
 
-					// Apply Scale and Position
 					tri.p1 = transform(p1Raw, scale, x, y, z);
 					tri.p2 = transform(p2Raw, scale, x, y, z);
 					tri.p3 = transform(p3Raw, scale, x, y, z);
 
 					tri.symbol = symbol;
+
+					if (Normals.size() > 0)
+					{
+						tri.n1 = Normals[normalIndices[0]];
+						tri.n2 = Normals[normalIndices[i]];
+						tri.n3 = Normals[normalIndices[i + 1]];
+						tri.setAvgNormal();
+					}
+
 					meshTriangles.push_back(tri);
 				}
 			}
 		}
 		file.close();
-		cout << "Loaded Model: " << filename << " with " << meshTriangles.size() << " triangles." << endl;
 	}
 
 	void addToScene()
@@ -265,22 +328,22 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-void screenSetConv(int x, int y, char c = ch)
-{
-	int _row, _col;
-	_row = row / 2 - y;
-	_col = x + col / 2;
-	if (_row < row && _row >= 0 && _col < col && _col >= 0)
-		screen[_row][_col] = c;
-}
-void screenPointSetConv(int x, int y)
-{
-	int _row, _col;
-	_row = row / 2 - y;
-	_col = x + col / 2;
-	if (_row < row && _row >= 0 && _col < col && _col >= 0)
-		screenpoints[_row][_col] = 1;
-}
+//void screenSetConv(int x, int y, char c = ch)
+//{
+//	int _row, _col;
+//	_row = row / 2 - y;
+//	_col = x + col / 2;
+//	if (_row < row && _row >= 0 && _col < col && _col >= 0)
+//		screen[_row][_col] = c;
+//}
+//void screenPointSetConv(int x, int y)
+//{
+//	int _row, _col;
+//	_row = row / 2 - y;
+//	_col = x + col / 2;
+//	if (_row < row && _row >= 0 && _col < col && _col >= 0)
+//		screenpoints[_row][_col] = 1;
+//}
 
 void screenSet(int x, int y, char c = ch)
 {
@@ -451,18 +514,24 @@ void renderTriangle3d(const TriangleToRender& tri)
 	point point2(project3d(tri.p2, 'x'), project3d(tri.p2, 'y'));
 	point point3(project3d(tri.p3, 'x'), project3d(tri.p3, 'y'));
 
-	printTriangle(point1, point2, point3, tri.symbol);
+	point3d lightDirinv = lightdir * -1;
+
+	float brightness = (tri.avgNor.normalized() * lightDirinv.normalized() + 1)/2; // 0 to 1
+	int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+
+	printTriangle(point1, point2, point3, brightnessSymbols[brightnessIndex]);
 }
 
-void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch)
+void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch, point3d avgNor = {0, 0, 1})
 {
-	TriangleToRender tri = {pointa, pointb, pointc, c};
+	TriangleToRender tri = {pointa, pointb, pointc, c, avgNor};
 	queue.push_back(tri);
 }
-void addFace3d(point3d pointa, point3d pointb, point3d pointc, point3d pointd, char c = ch)
+void addQuad3d(point3d pointa, point3d pointb, point3d pointc, point3d pointd, char c = ch, point3d avgNor = { 0, 0, 1 })
 {
-	addTriangle3d(pointa, pointb, pointc, c);
-	addTriangle3d(pointc, pointd, pointa, c);
+	TriangleToRender tri1 = { pointa, pointb, pointc, c, avgNor }, tri2 = { pointa, pointc, pointd, c, avgNor };
+	queue.push_back(tri1);
+	queue.push_back(tri2);
 }
 class block
 {
@@ -524,27 +593,27 @@ public:
 		}*/
 		if (!frontmatched)
 		{
-			addFace3d(e, f, g, h); //back
+			addQuad3d(e, f, g, h, '*', {0, 1, 0}); // +y back
 		}
 		if (!topmatched)
 		{
-			addFace3d(a, b, f, e, '.');     //bottom
+			addQuad3d(a, b, f, e, '.', { 0, 0, 1 });     //-z bottom
 		}
 		if (!rightmatched)
 		{
-			addFace3d(a, d, h, e, '#');    //left
+			addQuad3d(a, d, h, e, '#', { -1, 0, 0 });    //-x left
 		}
 		if (!leftmatched)
 		{
-			addFace3d(b, c, g, f, '#');    //right
+			addQuad3d(b, c, g, f, '#', { 1, 0, 0 });    //+x right
 		}
 		if (!bottommatched)
 		{
-			addFace3d(c, d, h, g, '@'); // top
+			addQuad3d(c, d, h, g, '@', { 0, 0, 1 }); // +z top
 		}
 		if (!backmatched)
 		{
-			addFace3d(a, b, c, d);    //front
+			addQuad3d(a, b, c, d, '*', { 0, -1, 0 });    //-y front
 		}
 	}
 };
@@ -647,7 +716,7 @@ static void load()
 	if (!fileExists(filename))
 	{
 		ofstream outFile(filename);
-		outFile << "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+		outFile << defaultSettingsText;
 		outFile.close();
 	}
 
@@ -655,7 +724,7 @@ static void load()
 	if (!fileExists(filename))
 	{
 		ofstream outFile(filename);
-		outFile << "Include 3D models here (Only obj files are supported)\n\nHow to use :\nFirst type m. Then after a space, the name of the file (including \".obj\"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\nAfter another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nMore briefly: \"m {filename.obj} {x} {y} {z} {scale} {character}\"\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
+		outFile << defaultModelspositionsText;
 		outFile.close();
 	}
 
@@ -686,11 +755,11 @@ static void load()
 			else if (key == "camera.pitch")
 				camera.pitch = stof(value);
 		}
-		catch (const std::invalid_argument& e)
+		catch (const invalid_argument& e)
 		{
 			cerr << "Warning: Corrupted or invalid data in save file for key: " << key << endl;
 		}
-		catch (const std::out_of_range& e)
+		catch (const out_of_range& e)
 		{
 			cerr << "Warning: Value out of range in save file for key: " << key << endl;
 		}
@@ -730,11 +799,11 @@ static void load()
 				settingsChanged = true;
 			}
 		}
-		catch (const std::invalid_argument& e)
+		catch (const invalid_argument& e)
 		{
 			cerr << "Warning: Corrupted or invalid data in settings file for key: " << key << endl;
 		}
-		catch (const std::out_of_range& e)
+		catch (const out_of_range& e)
 		{
 			cerr << "Warning: Value out of range in settings file for key: " << key << endl;
 		}
@@ -761,30 +830,15 @@ static void load()
 			continue;
 		}
 
-		size_t delimiter_pos;
-
 		line = line.substr(2);
-		delimiter_pos = line.find(' ');
-		string name = line.substr(0, delimiter_pos);
 
-		line = line.substr(delimiter_pos + 1);
-		delimiter_pos = line.find(' ');
-		float x = stof(line.substr(0, delimiter_pos));
+		stringstream ss(line);
 
-		line = line.substr(delimiter_pos + 1);
-		delimiter_pos = line.find(' ');
-		float y = stof(line.substr(0, delimiter_pos));
+		string name;
+		float x, y, z, scale;
+		char symbol;
 
-		line = line.substr(delimiter_pos + 1);
-		delimiter_pos = line.find(' ');
-		float z = stof(line.substr(0, delimiter_pos));
-
-		line = line.substr(delimiter_pos + 1);
-		delimiter_pos = line.find(' ');
-		float scale = stof(line.substr(0, delimiter_pos));
-
-		line = line.substr(delimiter_pos + 1);
-		char symbol = line[0];
+		ss >> name >> x >> y >> z >> scale >> symbol;
 
 		try
 		{
@@ -942,8 +996,8 @@ void prepareWorld()
 	//spawnModel("HalfSphere.obj", 0, 0, 1.5, 1.0f, '#');
 	//spawnModel("Castle OBJ.obj", 0, 10, 0, 1.0f, '#');
 	//spawnModel("MapleTree.obj", 20, 20, 0, 1.0f, '#');
-	/*spawnModel("MapleTreeLeaves.obj", 20, 20, 0, 1.0f, '(');
-	spawnModel("MapleTreeStem.obj", 20, 20, 0, 1.0f, '#');*/
+	//spawnModel("MapleTreeLeaves.obj", 20, 20, 0, 1.0f, '(');
+	//spawnModel("MapleTreeStem.obj", 20, 20, 0, 1.0f, '#');
 
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	
@@ -996,6 +1050,20 @@ int main()
 			if (find(validInputsMap.begin(), validInputsMap.end(), inp) != validInputsMap.end()) break;
 		}
 		action(inp);
+
+		/*if (lightdir.y > 1)
+		{
+			lightdir = { 1, -1, 0 };
+		}
+		else
+		{
+			lightdir.y += 0.01f;
+
+			if(lightdir.y < 0)
+				lightdir.z += 0.02f;
+			else
+				lightdir.z -= 0.02f;
+		}*/
 	}
 	return 0;
 }
