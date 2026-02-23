@@ -18,7 +18,7 @@ float cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 const vector<char> validInputsMap = { 'w', 'a', 's', 'd', ' ', 'v', 72, 80, 75, 77, 'r', 'o' , 'e', 'q'};
 vector<vector<char>> screen(row, vector<char>(col, ' '));
 vector<vector<bool>> screenpoints(row, vector<bool>(col, 0));
-const string brightnessSymbols = ".:-=+*#%@";
+const string brightnessSymbols = ".,-~:;=!*#$@";
 const char ch = '*';
 
 const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
