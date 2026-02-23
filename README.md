@@ -1,4 +1,8 @@
-<img width="1919" height="1028" alt="Screenshot 2026-02-19 002325" src="https://github.com/user-attachments/assets/c628e9d1-566b-4da8-b897-045a7fb9a1f5" />
+<img width="1919" height="1024" alt="Screenshot 2026-02-23 224050" src="https://github.com/user-attachments/assets/01d0b076-f040-4f56-be10-c002b06fe22d" /><img width="1919" height="1028" alt="Screenshot 2026-02-23 223936" src="https://github.com/user-attachments/assets/9cc82d44-e4dc-4de5-882b-abfca2907ca2" /><img width="1919" height="1022" alt="Screenshot 2026-02-23 223958" src="https://github.com/user-attachments/assets/dad0c5de-62dd-48e6-adbd-ef2f9a427dee" /><img width="1919" height="1024" alt="Screenshot 2026-02-23 224050" src="https://github.com/user-attachments/assets/dfbc3d1a-e104-4af2-b2a9-54df23cd8f6b" /><img width="1919" height="1023" alt="Screenshot 2026-02-23 223816" src="https://github.com/user-attachments/assets/dd0ce8f4-b3d8-4040-889c-608742e4d245" /><img width="1423" height="869" alt="Screenshot 2026-02-23 211212" src="https://github.com/user-attachments/assets/bc8bd3a0-fabb-4c6d-8b95-326082f4caaa" />
+
+
+
+
 
 # How to use:
 Go to [Source.cpp](Source.cpp), copy the entire file, compile it to an exe or download the [console 3D renderer.exe](x64/Release/console%203D%20renderer.exe) directly from here. Do not download exe files from anywhere untrustworthy on the internet.  
