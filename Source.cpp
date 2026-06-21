@@ -999,7 +999,7 @@ void prepareWorld()
 
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	
-	showHello(-40, 12, 0);
+	showHello(-12, 12, 0);
 	/*placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
