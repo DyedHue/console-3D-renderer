@@ -22,7 +22,7 @@ const string brightnessSymbols = ".,-~:;=!*#$@";
 const char ch = '*';
 
 const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
-const string defaultModelspositionsText = "Include 3D models here (Only obj files are supported)\n\nHow to use :\nFirst type m. Then after a space, the name of the file (including \".obj\"), after a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\nAfter another space, type the scale of the object (1 means original size), after another space, type a character (8 bit) which is going to be the character that will be used to show the model when it's visible on the screen.\nYou can include 1 model in one line. Any line works.\n\nMore briefly: \"m {filename.obj} {x} {y} {z} {scale} {character}\"\n\nFor example : \"m MyModel.obj 0 3.5 2.89 2 #\" (without the strings) is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size and it's going to show up with the character '#' when running.\n\n";
+const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
 
 
 //Helper functions {
@@ -99,7 +99,7 @@ public:
 	float y = -4;
 	float z = 1.5;
 
-	float yaw = 0;  //degrees, towards y positive (North) = 0, right = pos until 360
+	float yaw = 0;  //degrees, towards y positive (North) = 0, right = positive until 360
 	float pitch = 90; //degrees, up = 0, down = 180, straight = 90
 
 	void cameramove(char direction, float degree)
@@ -825,12 +825,10 @@ static void load()
 		{
 			line.pop_back();
 		}
-		if (!(line[0] == 'm' && line[1] == ' '))
+		if (line[0] == '#')
 		{
 			continue;
 		}
-
-		line = line.substr(2);
 
 		stringstream ss(line);
 
@@ -1001,8 +999,8 @@ void prepareWorld()
 
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	
-	/*showHello(-40, 12, 0);
-	placeHouse(-5, -5, 0);
+	showHello(-40, 12, 0);
+	/*placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
 	tree(-24, -7, 0);*/
