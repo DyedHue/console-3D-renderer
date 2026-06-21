@@ -1,0 +1,9 @@
+{
+  "scenarioId": "CppBuildToolsUpgrade",
+  "operationId": "e13269b3-3734-47db-9b39-b4c84e934e47",
+  "description": "Upgrade MSVC (C\u002B\u002B) Build Tools to the latest version and/or resolve C/C\u002B\u002B build issues.",
+  "startTime": "2026-06-21T08:32:17.7223433Z",
+  "lastUpdateTime": "2026-06-21T08:32:17.735343Z",
+  "properties": {},
+  "folderPath": ""
+}
