@@ -1,5 +1,9 @@
+#define NCURSES_MOUSE_VERSION 2
+#define PDC_NCMOUSE
+
 #include <iostream>
 #include <vector>
+#include <map>
 #include <cmath>
 #include <conio.h>
 #include <windows.h>
@@ -7,19 +11,31 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <chrono>
+#include <curses.h>
 using namespace std;
 
 const float PI = 3.1415926535f;
+
 int row = 100;
 int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
-float cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+float focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 
-const vector<char> validInputsMap = { 'w', 'a', 's', 'd', ' ', 'v', 72, 80, 75, 77, 'r', 'o' , 'e', 'q'};
 vector<vector<char>> screen(row, vector<char>(col, ' '));
 vector<vector<bool>> screenpoints(row, vector<bool>(col, 0));
 const string brightnessSymbols = ".,-~:;=!*#$@";
 const char ch = '*';
+
+float camSpeed = 60, walkSpeed = 2.5;
+float deltaTime = 0;
+map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
+							{' ', false}, {VK_SHIFT, false},
+							{VK_UP, false}, {VK_DOWN, false}, {VK_RIGHT, false}, {VK_LEFT, false},
+							{'E', false}, {'Q', false},
+							{'R', false}, {'O', false}};
+map<int, bool> wasPressed = isPressed;
+int lastmouse_x = -1, lastmouse_y = -1;
 
 const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
@@ -27,6 +43,7 @@ const string defaultModelspositionsText = "# You can import 3D models here as `.
 
 //Helper functions {
 float toradian(float angle) { return ((angle * PI) / 180.0f); }
+float todegree(float angle) { return (angle * (180.0f/PI)); }
 bool fileExists(const std::string& name) {
 	ifstream f(name.c_str());
 	return f.good();
@@ -57,9 +74,8 @@ public:
 	float x, y, z;
 
 	point3d(){x = 0, y = 0, z = 0;}
-	point3d(float X, float Y, float Z){x = X, y = Y, z = Z;}
 
-	point3d(int X, int Y, int Z) : x(X), y(Y), z(Z) {}
+	point3d(float X, float Y, float Z) : x(X), y(Y), z(Z) {}
 
 	bool operator==(const point3d& other) const
 	{
@@ -88,6 +104,10 @@ public:
 		}
 		return point3d(0, 0, 0);
 	}
+	float magnitude() const //use if you treat a point3d as a vector3
+	{
+		return sqrt(x * x + y * y + z * z);
+	}
 };
 
 point3d lightdir = point3d(1, 1, -1);
@@ -102,79 +122,78 @@ public:
 	float yaw = 0;  //degrees, towards y positive (North) = 0, right = positive until 360
 	float pitch = 90; //degrees, up = 0, down = 180, straight = 90
 
-	void cameramove(char direction, float degree)
+	void directionMove()
 	{
-		if (direction == 'r')
+		//int ch = _getch();
+		//if (ch == KEY_MOUSE)
+		//{
+		//	MEVENT event;
+		//	if (getmouse(&event) == OK)
+		//	{
+		//		if (lastmouse_x == -1 || lastmouse_y == -1)
+		//		{
+		//			lastmouse_x = event.x;
+		//			lastmouse_y = event.y;
+		//		}
+
+		//		int mouse_dx = event.x - lastmouse_x;
+		//		int mouse_dy = event.y - lastmouse_y;
+
+		//		yaw += mouse_dx * camSpeed * deltaTime;
+		//		pitch += mouse_dy * camSpeed * deltaTime;
+
+		//		lastmouse_x = event.x;
+		//		lastmouse_y = event.y;
+		//	}
+		//}
+		if(1)
 		{
-			yaw += degree;
-		}
-		else if (direction == 'l')
-		{
-			yaw -= degree;
-		}
-		else if (direction == 'u')
-		{
-			pitch -= degree;
-		}
-		else if (direction == 'd')
-		{
-			pitch += degree;
+			if (isPressed[VK_RIGHT])
+				yaw += camSpeed * deltaTime;
+			if (isPressed[VK_LEFT])
+				yaw -= camSpeed * deltaTime;
+			if (isPressed[VK_UP])
+				pitch -= camSpeed * deltaTime;
+			if (isPressed[VK_DOWN])
+				pitch += camSpeed * deltaTime;
 		}
 		if (yaw < 0)
-		{
 			yaw += 360;
-		}
 		else if (yaw > 360)
-		{
 			yaw -= 360;
-		}
 		if (pitch >= 180)
-		{
 			pitch = 179.9;
-		}
 		else if (pitch <= 0)
-		{
 			pitch = 0.1;
-		}
 	}
-	void move(char direction, float amount)
+	void positionMove()
 	{
-		float modifiedyaw = (90 - yaw); //0 to 360 similar to yaw, changes depending on the direction of movement
-		float movementvectorangle, movementvectorx, movementvectory;
+		point3d moveVec = {0, 0, 0};
 
-		if (!(direction == 'u' || direction == 'd'))
-		{
-			if (direction == 'b')
-			{
-				modifiedyaw = (90 - yaw) + 180;
-			}
-			else if (direction == 'l')
-			{
-				modifiedyaw = (90 - yaw) + 90;
-			}
-			else if (direction == 'r')
-			{
-				modifiedyaw = (90 - yaw) - 90;
-			}
+		if (isPressed['W'])
+			moveVec.y++;
+		if (isPressed['S'])
+			moveVec.y--;
+		if(isPressed['D'])
+			moveVec.x++;
+		if(isPressed['A'])
+			moveVec.x--;
+		if(isPressed[' '])
+			moveVec.z++;
+		if(isPressed[VK_SHIFT])
+			moveVec.z--;
 
-			movementvectorangle = modifiedyaw;
-			movementvectorx = amount * cos(toradian(movementvectorangle));
-			movementvectory = amount * sin(toradian(movementvectorangle));
+		float sinyaw = sin(toradian(yaw)), cosyaw = cos(toradian(yaw));
+		float newx = moveVec.x * cosyaw + moveVec.y * sinyaw;
+		float newy = -moveVec.x * sinyaw + moveVec.y * cosyaw;
 
-			x += movementvectorx;
-			y += movementvectory;
-		}
-		else
-		{
-			if (direction == 'u')
-			{
-				z += amount;
-			}
-			else if (direction == 'd')
-			{
-				z -= amount;
-			}
-		}
+		moveVec = {newx, newy, moveVec.z};
+		moveVec = moveVec.normalized();
+
+		float moveAmount = walkSpeed * deltaTime * (1 + 2 * isPressed[VK_CONTROL]);
+		x += moveVec.x * moveAmount;
+		y += moveVec.y * moveAmount;
+		z += moveVec.z * moveAmount;
 	}
 	point3d unitVector()
 	{
@@ -328,23 +347,6 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-//void screenSetConv(int x, int y, char c = ch)
-//{
-//	int _row, _col;
-//	_row = row / 2 - y;
-//	_col = x + col / 2;
-//	if (_row < row && _row >= 0 && _col < col && _col >= 0)
-//		screen[_row][_col] = c;
-//}
-//void screenPointSetConv(int x, int y)
-//{
-//	int _row, _col;
-//	_row = row / 2 - y;
-//	_col = x + col / 2;
-//	if (_row < row && _row >= 0 && _col < col && _col >= 0)
-//		screenpoints[_row][_col] = 1;
-//}
-
 void screenSet(int x, int y, char c = ch)
 {
 	int _row = y, _col = x;
@@ -480,8 +482,8 @@ void printTriangle(const point &point1, const point &point2, const point &point3
 
 int project3d(const point3d &pointa, char c)
 {
-	if      (c == 'x') return cameratoScreen * (pointa.x / pointa.y); //col
-	else if (c == 'y') return cameratoScreen * (pointa.z / pointa.y); //row
+	if      (c == 'x') return round(focalLengthpx * (pointa.x / pointa.y)); //col
+	else if (c == 'y') return round(focalLengthpx * (pointa.z / pointa.y)); //row
 }
 point3d transformtoCamSpace(const point3d &w)
 {
@@ -810,7 +812,7 @@ static void load()
 	}
 	if (settingsChanged)
 	{
-		cameratoScreen = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+		focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 		screen.assign(row, vector<char>(col, ' '));
 		screenpoints.assign(row, vector<bool>(col, false));
 	}
@@ -875,9 +877,43 @@ void show()
 		fullFrame += "_";
 
 	printf("%s", fullFrame.c_str());
-	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch
+	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
 		<< "                                        \n";
 
+
+	for (auto& rowVec : screen)
+		fill(rowVec.begin(), rowVec.end(), ' ');
+}
+
+void show2()
+{
+	// draw to curses window instead of printing to stdout (pdcurses takes over console output)
+	screen[row / 2][col / 2] = 'O';
+
+	clear();
+
+	// Map the internal buffer to terminal coordinates. Each logical column uses two terminal columns (char + space)
+	for (int i = 0; i < row; i++)
+	{
+		int term_x = 0;
+		for (int j = 1; j < col - 1; j++)
+		{
+			// ensure we don't write outside the terminal window
+			if (i >= LINES || term_x >= COLS) break;
+			wchar_t ch = screen[i][j];
+			mvaddch(i, term_x, ch);
+			term_x += 2; // keep spacing similar to original output
+		}
+	}
+
+	// status line below the rendered area (if there's space)
+	if (row < LINES)
+	{
+		mvprintw(row, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
+			camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
+	}
+
+	refresh();
 
 	for (auto& rowVec : screen)
 		fill(rowVec.begin(), rowVec.end(), ' ');
@@ -1006,27 +1042,25 @@ void prepareWorld()
 	tree(-24, -7, 0);*/
 }
 
-void action(char c)
+void action()
 {
-	if (c == 'w') camera.move('f', 0.5);
-	else if (c == 's') camera.move('b', 0.5);
-	else if (c == 'a') camera.move('l', 0.5);
-	else if (c == 'd') camera.move('r', 0.5);
-
-	else if (c == ' ') camera.move('u', 0.5);
-	else if (c == 'v') camera.move('d', 0.5);
-
-	else if (c == 72) camera.cameramove('u', 5);
-	else if (c == 75) camera.cameramove('l', 5);
-	else if (c == 80) camera.cameramove('d', 5);
-	else if (c == 77) camera.cameramove('r', 5);
-
-	else if (c == 'r') system("cls");
-
-	else if (c == 'o') save();
-
-	else if (c == 'e') placeBlock();
-	else if (c == 'q') breakBlock();
+	for(auto &i: isPressed)
+	{
+		i.second = (GetAsyncKeyState(i.first) & 0x8000);
+	}
+	camera.positionMove();
+	camera.directionMove();
+	
+	if(!isPressed['E'] && wasPressed['E'])
+		placeBlock();
+	else if(!isPressed ['Q'] && wasPressed['Q'])
+		breakBlock();
+	else if (!isPressed ['R'] && wasPressed['R'])
+		system("cls");
+	else if (!isPressed ['O'] && wasPressed['O'])
+		save();
+	
+	wasPressed = isPressed;
 }
 
 int main()
@@ -1034,34 +1068,31 @@ int main()
 	ios_base::sync_with_stdio(false);
 	cin.tie(NULL);
 	
+	//// 1. Initialize curses in non-blocking mode
+	//initscr();
+	//cbreak();
+	//noecho();
+	//keypad(stdscr, TRUE);
+	//timeout(0);
+
+	//// 2. Enable mouse position tracking
+	//mousemask(ALL_MOUSE_EVENTS | BUTTON_MOVED, NULL);
+
 	load();
 	prepareWorld();
-	int inp;
+
+	auto lastTime = std::chrono::high_resolution_clock::now();
 	while (1)
 	{
+		auto currentTime = chrono::high_resolution_clock::now();
+		chrono::duration<float> elapsedTime = currentTime - lastTime;
+		deltaTime = elapsedTime.count();
+		lastTime = currentTime;
+
 		queue.clear();
 		render();
 		show();
-		while (1)
-		{
-			inp = _getch();
-			if (find(validInputsMap.begin(), validInputsMap.end(), inp) != validInputsMap.end()) break;
-		}
-		action(inp);
-
-		/*if (lightdir.y > 1)
-		{
-			lightdir = { 1, -1, 0 };
-		}
-		else
-		{
-			lightdir.y += 0.01f;
-
-			if(lightdir.y < 0)
-				lightdir.z += 0.02f;
-			else
-				lightdir.z -= 0.02f;
-		}*/
+		action();
 	}
 	return 0;
 }
