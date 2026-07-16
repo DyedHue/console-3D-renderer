@@ -1,5 +1,5 @@
-#define NCURSES_MOUSE_VERSION 2
-#define PDC_NCMOUSE
+//#define NCURSES_MOUSE_VERSION 2
+//#define PDC_NCMOUSE
 
 #include <iostream>
 #include <vector>
@@ -12,7 +12,7 @@
 #include <sstream>
 #include <string>
 #include <chrono>
-#include <curses.h>
+//#include <curses.h>
 using namespace std;
 
 const float PI = 3.1415926535f;
@@ -885,39 +885,39 @@ void show()
 		fill(rowVec.begin(), rowVec.end(), ' ');
 }
 
-void show2()
-{
-	// draw to curses window instead of printing to stdout (pdcurses takes over console output)
-	screen[row / 2][col / 2] = 'O';
-
-	clear();
-
-	// Map the internal buffer to terminal coordinates. Each logical column uses two terminal columns (char + space)
-	for (int i = 0; i < row; i++)
-	{
-		int term_x = 0;
-		for (int j = 1; j < col - 1; j++)
-		{
-			// ensure we don't write outside the terminal window
-			if (i >= LINES || term_x >= COLS) break;
-			wchar_t ch = screen[i][j];
-			mvaddch(i, term_x, ch);
-			term_x += 2; // keep spacing similar to original output
-		}
-	}
-
-	// status line below the rendered area (if there's space)
-	if (row < LINES)
-	{
-		mvprintw(row, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
-			camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
-	}
-
-	refresh();
-
-	for (auto& rowVec : screen)
-		fill(rowVec.begin(), rowVec.end(), ' ');
-}
+//void show2()
+//{
+//	// draw to curses window instead of printing to stdout (pdcurses takes over console output)
+//	screen[row / 2][col / 2] = 'O';
+//
+//	clear();
+//
+//	// Map the internal buffer to terminal coordinates. Each logical column uses two terminal columns (char + space)
+//	for (int i = 0; i < row; i++)
+//	{
+//		int term_x = 0;
+//		for (int j = 1; j < col - 1; j++)
+//		{
+//			// ensure we don't write outside the terminal window
+//			if (i >= LINES || term_x >= COLS) break;
+//			wchar_t ch = screen[i][j];
+//			mvaddch(i, term_x, ch);
+//			term_x += 2; // keep spacing similar to original output
+//		}
+//	}
+//
+//	// status line below the rendered area (if there's space)
+//	if (row < LINES)
+//	{
+//		mvprintw(row, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
+//			camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
+//	}
+//
+//	refresh();
+//
+//	for (auto& rowVec : screen)
+//		fill(rowVec.begin(), rowVec.end(), ' ');
+//}
 
 void road()
 {
