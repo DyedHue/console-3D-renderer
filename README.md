@@ -8,6 +8,8 @@ After running the exe, maximise the window, use control and scroll bar or `+`/`-
   
 Use `wasd` keys to move around, `arrow keys` / mouse to look around, `space` for going up, `ctrl` for going down, `e` / `mouse left click` to place blocks and `q` / `mouse right click` to break them.  
 You can press `o` to save your current position and look direction which will be loaded the next time you run the exe.
+>[!NOTE]
+>Press Esc to lock/unlock your mouse cursor.
 # How to import models:
 You can import 3D models as `.obj` files only. Keep your obj file in the same directory as the exe.  
 1. Go to `Models Positions.txt` within the same directory as the exe.
