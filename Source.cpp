@@ -28,7 +28,7 @@ const float PI = 3.141593f;
 int row = 100;
 int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
-float camSpeed = 60, walkSpeed = 2.5;
+float camSpeedMouse = 10, camSpeedKeyboard = 60, walkSpeed = 2.5;
 bool useNcurses = true;
 
 vector<vector<char>> screen;
@@ -37,20 +37,20 @@ float focalLengthpx;
 const string brightnessSymbols = ".,-~:;=!*#$@";
 const char ch = '*';
 
-
 map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
 							{' ', false}, {VK_SHIFT, false},
 							{VK_UP, false}, {VK_DOWN, false}, {VK_RIGHT, false}, {VK_LEFT, false},
 							{'E', false}, {'Q', false},
 							{'R', false}, {'O', false}, 
-	                        {VK_ESCAPE, false}};
+	                        {VK_ESCAPE, false},
+	                        {VK_LBUTTON, false}, {VK_RBUTTON, false}};
 map<int, bool> wasPressed = isPressed;
 
-int lastmouse_x = -1, lastmouse_y = -1;
+POINT screenCenter;
 float deltaTime = 0;
 bool mouseLocked = 1;
 
-const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# Ncurses is a library that allows mouse inputs. If this is causing any problem, you can disable it from here.\nuse_ncurses=1\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed=60\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=60\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
 
 
@@ -72,6 +72,14 @@ void constructScreen()
 	screen.assign(row, vector<char>(col, ' '));
 	screenpoints.assign(row, vector<bool>(col, false));
 	focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+}
+bool justReleased(int button)
+{
+	return !isPressed[button] && wasPressed[button];
+}
+bool justPressed(int button)
+{
+	return isPressed[button] && !wasPressed[button];
 }
 // }
 
@@ -143,45 +151,27 @@ public:
 
 	void directionMove()
 	{
-#if HAS_NCURSES
-		if (useNcurses)
+		POINT mousePos;
+		GetCursorPos(&mousePos);
+		if (mouseLocked)
 		{
-			int ch = getch();
-			if (ch == KEY_MOUSE)
-			{
-				MEVENT event;
-				if (getmouse(&event) == OK)
-				{
-					if (lastmouse_x == -1 || lastmouse_y == -1)
-					{
-						lastmouse_x = event.x;
-						lastmouse_y = event.y;
-					}
+			int mouse_dx = mousePos.x - screenCenter.x;
+			int mouse_dy = mousePos.y - screenCenter.y;
 
-					if (mouseLocked)
-					{
-						int mouse_dx = event.x - lastmouse_x;
-						int mouse_dy = event.y - lastmouse_y;
+			yaw += mouse_dx * camSpeedMouse * deltaTime;
+			pitch += mouse_dy * camSpeedMouse * deltaTime;
 
-						yaw += mouse_dx * camSpeed * deltaTime;
-						pitch += mouse_dy * camSpeed * deltaTime;
-					}
-
-					lastmouse_x = event.x;
-					lastmouse_y = event.y;
-				}
-			}
+			SetCursorPos(screenCenter.x, screenCenter.y);
 		}
-#endif
 
 		if (isPressed[VK_RIGHT])
-			yaw += camSpeed * deltaTime;
+			yaw += camSpeedKeyboard * deltaTime;
 		if (isPressed[VK_LEFT])
-			yaw -= camSpeed * deltaTime;
+			yaw -= camSpeedKeyboard * deltaTime;
 		if (isPressed[VK_UP])
-			pitch -= camSpeed * deltaTime;
+			pitch -= camSpeedKeyboard * deltaTime;
 		if (isPressed[VK_DOWN])
-			pitch += camSpeed * deltaTime;
+			pitch += camSpeedKeyboard * deltaTime;
 
 		if (yaw < 0)
 			yaw += 360;
@@ -206,7 +196,7 @@ public:
 			moveVec.x--;
 		if(isPressed[' '])
 			moveVec.z++;
-		if(isPressed[VK_SHIFT])
+		if(isPressed[VK_CONTROL])
 			moveVec.z--;
 
 		float sinyaw = sin(toradian(yaw)), cosyaw = cos(toradian(yaw));
@@ -216,7 +206,7 @@ public:
 		moveVec = {newx, newy, moveVec.z};
 		moveVec = moveVec.normalized();
 
-		float moveAmount = walkSpeed * deltaTime * (1 + 2 * isPressed[VK_CONTROL]);
+		float moveAmount = walkSpeed * deltaTime * (1 + 2 * isPressed[VK_SHIFT]);
 		x += moveVec.x * moveAmount;
 		y += moveVec.y * moveAmount;
 		z += moveVec.z * moveAmount;
@@ -820,8 +810,10 @@ static void load()
 				col = stoi(value) + 2; //adjusting the desired column number to actual column number as 2 colums on the sides are not displayed
 			else if (key == "use_ncurses")
 				useNcurses = stoi(value);
-			else if (key == "cam_speed")
-				camSpeed = stof(value);
+			else if (key == "cam_speed_mouse")
+				camSpeedMouse = stof(value);
+			else if (key == "cam_speed_keyboard")
+				camSpeedKeyboard = stof(value);
 			else if (key == "walk_speed")
 				walkSpeed = stof(value);
 		}
@@ -1080,16 +1072,19 @@ void action()
 	camera.positionMove();
 	camera.directionMove();
 	
-	if(!isPressed['E'] && wasPressed['E'])
+	if(justReleased('E') || justReleased(VK_RBUTTON))
 		placeBlock();
-	else if(!isPressed ['Q'] && wasPressed['Q'])
+	else if(justReleased('Q') || justReleased(VK_LBUTTON))
 		breakBlock();
-	else if (!isPressed ['R'] && wasPressed['R'])
+	else if (justReleased('R'))
 		system("cls");
-	else if (!isPressed ['O'] && wasPressed['O'])
+	else if (justReleased('O'))
 		save();
-	else if (!isPressed[VK_ESCAPE] && wasPressed[VK_ESCAPE])
+	else if (justReleased(VK_ESCAPE))
+	{
 		mouseLocked = !mouseLocked;
+		//ShowCursor(!mouseLocked);
+	}
 
 	wasPressed = isPressed;
 }
@@ -1115,15 +1110,24 @@ int main()
 		noecho();
 		keypad(stdscr, TRUE);
 		timeout(0);
+		curs_set(0);
 
-		// 2. Enable mouse position tracking
+		// 2. Enable mouse position tracking (not used but it helps make the terminal non selectable)
 		mousemask(ALL_MOUSE_EVENTS | BUTTON_MOVED, NULL);
 
-		row = LINES - 4;
-		col = COLS/2 - 4;
+		row = LINES - 3;
+		col = COLS/2;
 		constructScreen();
 	}
 #endif
+
+	int screen_width = GetSystemMetrics(SM_CXSCREEN);
+	int screen_height = GetSystemMetrics(SM_CYSCREEN);
+	screenCenter.x = screen_width / 2;
+	screenCenter.y = screen_height / 2;
+
+	// Lock mouse initially
+	SetCursorPos(screenCenter.x, screenCenter.y);
 
 	auto lastTime = std::chrono::high_resolution_clock::now();
 	while (1)
