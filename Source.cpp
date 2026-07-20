@@ -14,11 +14,11 @@
 #include <chrono>
 #include <windows.h>
 #include <conio.h>
+
+#define HAS_NCURSES 0
 #if __has_include(<curses.h>)
 	#include <curses.h>
 	#define HAS_NCURSES 1
-#else
-	#define HAS_NCURSES 0
 #endif
 
 using namespace std;
