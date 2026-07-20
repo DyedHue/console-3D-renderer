@@ -1,43 +1,56 @@
-//#define NCURSES_MOUSE_VERSION 2
-//#define PDC_NCMOUSE
+#define NCURSES_MOUSE_VERSION 2
+#define PDC_NCMOUSE
 
 #include <iostream>
+#include <string>
 #include <vector>
 #include <map>
-#include <cmath>
-#include <conio.h>
-#include <windows.h>
+
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
-#include <string>
+
 #include <chrono>
-//#include <curses.h>
+#include <windows.h>
+#include <conio.h>
+#if __has_include(<curses.h>)
+	#include <curses.h>
+	#define HAS_NCURSES 1
+#else
+	#define HAS_NCURSES 0
+#endif
+
 using namespace std;
 
-const float PI = 3.1415926535f;
+const float PI = 3.141593f;
 
 int row = 100;
 int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
-float focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+float camSpeed = 60, walkSpeed = 2.5;
+bool useNcurses = true;
 
-vector<vector<char>> screen(row, vector<char>(col, ' '));
-vector<vector<bool>> screenpoints(row, vector<bool>(col, 0));
+vector<vector<char>> screen;
+vector<vector<bool>> screenpoints;
+float focalLengthpx;
 const string brightnessSymbols = ".,-~:;=!*#$@";
 const char ch = '*';
 
-float camSpeed = 60, walkSpeed = 2.5;
-float deltaTime = 0;
+
 map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
 							{' ', false}, {VK_SHIFT, false},
 							{VK_UP, false}, {VK_DOWN, false}, {VK_RIGHT, false}, {VK_LEFT, false},
 							{'E', false}, {'Q', false},
-							{'R', false}, {'O', false}};
+							{'R', false}, {'O', false}, 
+	                        {VK_ESCAPE, false}};
 map<int, bool> wasPressed = isPressed;
-int lastmouse_x = -1, lastmouse_y = -1;
 
-const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+int lastmouse_x = -1, lastmouse_y = -1;
+float deltaTime = 0;
+bool mouseLocked = 1;
+
+const string defaultSettingsText = "# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n# Ncurses is a library that allows mouse inputs. If this is causing any problem, you can disable it from here.\nuse_ncurses=1\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed=60\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place an object in (x, y, z) = (0, 3.5, 2.89) with 2 times its original size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
 
 
@@ -53,6 +66,12 @@ void setCursorPosition(int x, int y)
 	static const HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
 	COORD coord = { (SHORT)x, (SHORT)y };
 	SetConsoleCursorPosition(hOut, coord);
+}
+void constructScreen()
+{
+	screen.assign(row, vector<char>(col, ' '));
+	screenpoints.assign(row, vector<bool>(col, false));
+	focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 }
 // }
 
@@ -124,39 +143,46 @@ public:
 
 	void directionMove()
 	{
-		//int ch = _getch();
-		//if (ch == KEY_MOUSE)
-		//{
-		//	MEVENT event;
-		//	if (getmouse(&event) == OK)
-		//	{
-		//		if (lastmouse_x == -1 || lastmouse_y == -1)
-		//		{
-		//			lastmouse_x = event.x;
-		//			lastmouse_y = event.y;
-		//		}
-
-		//		int mouse_dx = event.x - lastmouse_x;
-		//		int mouse_dy = event.y - lastmouse_y;
-
-		//		yaw += mouse_dx * camSpeed * deltaTime;
-		//		pitch += mouse_dy * camSpeed * deltaTime;
-
-		//		lastmouse_x = event.x;
-		//		lastmouse_y = event.y;
-		//	}
-		//}
-		if(1)
+#if HAS_NCURSES
+		if (useNcurses)
 		{
-			if (isPressed[VK_RIGHT])
-				yaw += camSpeed * deltaTime;
-			if (isPressed[VK_LEFT])
-				yaw -= camSpeed * deltaTime;
-			if (isPressed[VK_UP])
-				pitch -= camSpeed * deltaTime;
-			if (isPressed[VK_DOWN])
-				pitch += camSpeed * deltaTime;
+			int ch = getch();
+			if (ch == KEY_MOUSE)
+			{
+				MEVENT event;
+				if (getmouse(&event) == OK)
+				{
+					if (lastmouse_x == -1 || lastmouse_y == -1)
+					{
+						lastmouse_x = event.x;
+						lastmouse_y = event.y;
+					}
+
+					if (mouseLocked)
+					{
+						int mouse_dx = event.x - lastmouse_x;
+						int mouse_dy = event.y - lastmouse_y;
+
+						yaw += mouse_dx * camSpeed * deltaTime;
+						pitch += mouse_dy * camSpeed * deltaTime;
+					}
+
+					lastmouse_x = event.x;
+					lastmouse_y = event.y;
+				}
+			}
 		}
+#endif
+
+		if (isPressed[VK_RIGHT])
+			yaw += camSpeed * deltaTime;
+		if (isPressed[VK_LEFT])
+			yaw -= camSpeed * deltaTime;
+		if (isPressed[VK_UP])
+			pitch -= camSpeed * deltaTime;
+		if (isPressed[VK_DOWN])
+			pitch += camSpeed * deltaTime;
+
 		if (yaw < 0)
 			yaw += 360;
 		else if (yaw > 360)
@@ -484,6 +510,7 @@ int project3d(const point3d &pointa, char c)
 {
 	if      (c == 'x') return round(focalLengthpx * (pointa.x / pointa.y)); //col
 	else if (c == 'y') return round(focalLengthpx * (pointa.z / pointa.y)); //row
+	return -1;
 }
 point3d transformtoCamSpace(const point3d &w)
 {
@@ -786,20 +813,17 @@ static void load()
 		try
 		{
 			if (key == "fov")
-			{
 				hfov = stof(value);
-				settingsChanged = true;
-			}
 			else if (key == "row")
-			{
 				row = stoi(value);
-				settingsChanged = true;
-			}
 			else if (key == "col")
-			{
 				col = stoi(value) + 2; //adjusting the desired column number to actual column number as 2 colums on the sides are not displayed
-				settingsChanged = true;
-			}
+			else if (key == "use_ncurses")
+				useNcurses = stoi(value);
+			else if (key == "cam_speed")
+				camSpeed = stof(value);
+			else if (key == "walk_speed")
+				walkSpeed = stof(value);
 		}
 		catch (const invalid_argument& e)
 		{
@@ -809,12 +833,6 @@ static void load()
 		{
 			cerr << "Warning: Value out of range in settings file for key: " << key << endl;
 		}
-	}
-	if (settingsChanged)
-	{
-		focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
-		screen.assign(row, vector<char>(col, ' '));
-		screenpoints.assign(row, vector<bool>(col, false));
 	}
 	settings.close();
 
@@ -855,69 +873,80 @@ static void load()
 void show()
 {
 	screen[row / 2][col / 2] = 'O';
-	setCursorPosition(0, 0);
 
-	string fullFrame = "";
-	fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
-	for (int i = 0; i < col * 2 - 2; i++)
-		fullFrame += "_";
-	fullFrame += "\n";
-
-	for (int i = 0; i < row; i++)
+#if HAS_NCURSES
+	if (useNcurses)
 	{
-		fullFrame += "|";
-		for (int j = 1; j < col - 1; j++)
+		clear();
+
+		for (int i = 0; i < col * 2 - 3; i++)
 		{
-			fullFrame += screen[i][j];
-			fullFrame += ' ';
+			mvaddch(0, i, ACS_HLINE);
+			mvaddch(row + 1, i, ACS_HLINE);
 		}
-		fullFrame += "|\n";
+
+		for (int i = 1; i <= row; i++)
+		{
+			mvaddch(i, 0, ACS_VLINE);
+			mvaddch(i, col * 2 - 3, ACS_VLINE);
+		}
+
+		for (int i = 0; i < row; i++)
+		{
+			int term_x = 1;
+			for (int j = 1; j < col - 1; j++)
+			{
+				if (i >= LINES || term_x >= COLS) break;
+
+				char ch = screen[i][j];
+				mvaddch(i + 1, term_x, ch);
+
+				if(j != col - 2)
+					term_x += 2;
+			}
+		}
+
+		if (row < LINES)
+		{
+			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
+				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
+		}
+
+		refresh();
 	}
-	for (int i = 0; i < col * 2 - 2; i++)
-		fullFrame += "_";
+#endif
+	if (!(HAS_NCURSES && useNcurses))
+	{
+		setCursorPosition(0, 0);
 
-	printf("%s", fullFrame.c_str());
-	cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
-		<< "                                        \n";
+		string fullFrame = "";
+		fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
+		for (int i = 0; i < col * 2 - 2; i++)
+			fullFrame += "_";
+			fullFrame += "\n";
 
+			for (int i = 0; i < row; i++)
+			{
+				fullFrame += "|";
+				for (int j = 1; j < col - 1; j++)
+				{
+					fullFrame += screen[i][j];
+					fullFrame += ' ';
+				}
+				fullFrame += "|\n";
+			}
+		for (int i = 0; i < col * 2 - 2; i++)
+			fullFrame += "_";
+
+		cout << fullFrame;
+		cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
+			<< "                                        \n";
+	}
 
 	for (auto& rowVec : screen)
-		fill(rowVec.begin(), rowVec.end(), ' ');
+	fill(rowVec.begin(), rowVec.end(), ' ');
 }
 
-//void show2()
-//{
-//	// draw to curses window instead of printing to stdout (pdcurses takes over console output)
-//	screen[row / 2][col / 2] = 'O';
-//
-//	clear();
-//
-//	// Map the internal buffer to terminal coordinates. Each logical column uses two terminal columns (char + space)
-//	for (int i = 0; i < row; i++)
-//	{
-//		int term_x = 0;
-//		for (int j = 1; j < col - 1; j++)
-//		{
-//			// ensure we don't write outside the terminal window
-//			if (i >= LINES || term_x >= COLS) break;
-//			wchar_t ch = screen[i][j];
-//			mvaddch(i, term_x, ch);
-//			term_x += 2; // keep spacing similar to original output
-//		}
-//	}
-//
-//	// status line below the rendered area (if there's space)
-//	if (row < LINES)
-//	{
-//		mvprintw(row, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
-//			camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
-//	}
-//
-//	refresh();
-//
-//	for (auto& rowVec : screen)
-//		fill(rowVec.begin(), rowVec.end(), ' ');
-//}
 
 void road()
 {
@@ -1059,7 +1088,9 @@ void action()
 		system("cls");
 	else if (!isPressed ['O'] && wasPressed['O'])
 		save();
-	
+	else if (!isPressed[VK_ESCAPE] && wasPressed[VK_ESCAPE])
+		mouseLocked = !mouseLocked;
+
 	wasPressed = isPressed;
 }
 
@@ -1067,19 +1098,32 @@ int main()
 {
 	ios_base::sync_with_stdio(false);
 	cin.tie(NULL);
-	
-	//// 1. Initialize curses in non-blocking mode
-	//initscr();
-	//cbreak();
-	//noecho();
-	//keypad(stdscr, TRUE);
-	//timeout(0);
-
-	//// 2. Enable mouse position tracking
-	//mousemask(ALL_MOUSE_EVENTS | BUTTON_MOVED, NULL);
 
 	load();
+	constructScreen();
 	prepareWorld();
+
+	cout << "Press Any Key to start. Make sure to resize your terminal before starting.";
+	_getch();
+
+#if HAS_NCURSES
+	if(useNcurses)
+	{
+		// 1. Initialize curses in non-blocking mode
+		initscr();
+		cbreak();
+		noecho();
+		keypad(stdscr, TRUE);
+		timeout(0);
+
+		// 2. Enable mouse position tracking
+		mousemask(ALL_MOUSE_EVENTS | BUTTON_MOVED, NULL);
+
+		row = LINES - 4;
+		col = COLS/2 - 4;
+		constructScreen();
+	}
+#endif
 
 	auto lastTime = std::chrono::high_resolution_clock::now();
 	while (1)
