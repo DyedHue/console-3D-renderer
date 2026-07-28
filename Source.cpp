@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <array>
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,9 @@ float hfov = 90;
 float camSpeedMouse = 10, camSpeedKeyboard = 60, walkSpeed = 2.5;
 bool useNcurses = true;
 
+float equationRayStep = 0.05;
+float equationSolveTolerance = 0.1;
+
 vector<vector<char>> screen;
 vector<vector<bool>> screenpoints;
 float focalLengthpx;
@@ -52,7 +56,6 @@ bool mouseLocked = 1;
 
 const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=80\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place the `MyModel.obj` model in (x, y, z) = (0, 3.5, 2.89) with 2 times its base size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
-
 
 //Helper functions {
 float toradian(float angle) { return ((angle * PI) / 180.0f); }
@@ -80,6 +83,18 @@ bool justReleased(int button)
 bool justPressed(int button)
 {
 	return isPressed[button] && !wasPressed[button];
+}
+float ftoi_power(float n, int ex) //only upto 3
+{
+	switch (ex)
+	{
+	    case 0: return 1;
+	    case 1: return n;
+		case 2: return n * n;
+		case 3: return n * n * n;
+		case 4: return n * n * n * n;
+		case 5: return n * n * n * n * n;
+	}
 }
 // }
 
@@ -116,6 +131,10 @@ public:
 	point3d operator+(const point3d& other) const //adding two vectors
 	{
 		return point3d(x + other.x, y + other.y, z + other.z);
+	}
+	point3d operator-(const point3d& other) const //subtracting two vectors
+	{
+		return point3d(x - other.x, y - other.y, z - other.z);
 	}
 
 	point3d operator*(const float& mag) const //multiplying a vector by a scalar (considering vectors)
@@ -243,6 +262,60 @@ public:
 };
 vector<TriangleToRender> queue;
 
+class Equation
+{
+public:
+	array <array<array<float, 5>, 5>, 5> coef = {0};
+	float tolerance = equationSolveTolerance;
+	bool solve(const point3d& p)
+	{
+		float ans = 0;
+		for (int i = 0; i < 5; i++)
+		{
+			for (int j = 0; j < 5; j++)
+			{
+				for (int k = 0; k < 5; k++)
+				{
+					if(!coef[i][j][k]) continue;
+					ans += coef[i][j][k] * ftoi_power(p.x, i) * ftoi_power(p.y, j) * ftoi_power(p.z, k);
+				}
+			}
+		}
+
+		if (ans < tolerance && ans > -tolerance) return true;
+
+		return false;
+	}
+};
+vector<Equation>Equations;
+bool sphere(const point3d& p, float x = 0, float y = 0, float z = 0, float r = 2, float s = 1)
+{
+	x = (p.x - x)/s, y = (p.y - y)/s, z = (p.z - z)/s;
+
+	float ans = x*x + y*y + z*z - r*r;
+
+	if (ans < equationSolveTolerance && ans > -equationSolveTolerance) return true;
+	return false;
+}
+bool torus(const point3d& p, float x = 0, float y = 0, float z = 0, float R = 0.8, float r = 0.3, float s = 1)
+{
+	x = (p.x - x)/s, y = (p.y - y)/s, z = (p.z - z)/s;
+
+	float ans = ftoi_power(sqrt(x*x + y*y) - R, 2) + z*z - r*r;
+
+	if (ans < equationSolveTolerance && ans > -equationSolveTolerance) return true;
+	return false;
+}
+bool heart(const point3d& p, float x = 0, float y = 0, float z = 0, float s = 1)
+{
+	x = (p.x - x)/s, y = (p.y - y)/s, z = (p.z - z)/s;
+
+	float xx = x*x, yy = y*y, zzz = z*z*z;
+	float ans = ftoi_power(xx + (9.0/4.0) * yy + z*z - 1, 3) - xx * zzz - (9.0/200.0) * yy * zzz;
+
+	if (ans <=0)/* equationSolveTolerance&& ans > -equationSolveTolerance)*/ return true;
+	return false;
+}
 class Model
 {
 public:
@@ -515,7 +588,7 @@ point3d transformtoCamSpace(const point3d &w)
 	float yawedy = newx * sinangleRad + newy * cosangleRad;
 
 
-	angleRad = toradian(-(90 - camera.pitch));
+	angleRad = toradian(camera.pitch - 90);
 	cosangleRad = cos(angleRad), sinangleRad = sin(angleRad);
 
 	float pitchedy = yawedy * cosangleRad - newz * sinangleRad;
@@ -523,6 +596,46 @@ point3d transformtoCamSpace(const point3d &w)
 
 	return point3d(yawedx, pitchedy, pitchedz);
 }
+
+point3d transformtoWorldSpace(const point3d& w)
+{
+	//float angleRad = toradian(-camera.pitch + 90);
+	//float cosangleRad = cos(angleRad), sinangleRad = sin(angleRad);
+
+	//float pitchedy = w.y * cosangleRad - w.z * sinangleRad;
+	//float pitchedz = w.y * sinangleRad + w.z * cosangleRad;
+
+
+	//angleRad = toradian(-camera.yaw);
+	//cosangleRad = cos(angleRad), sinangleRad = sin(angleRad);
+
+	//float yawedx = w.x * cosangleRad - pitchedy * sinangleRad;
+	//float yawedy = w.x * sinangleRad + pitchedy * cosangleRad;
+
+	//return point3d(yawedx + camera.x, yawedy + camera.y, pitchedz + camera.z);
+
+
+
+
+	float angleRad = toradian(-(camera.pitch - 90));
+	float cosangleRad = cos(angleRad), sinangleRad = sin(angleRad);
+
+	float unpitchedy = w.y * cosangleRad - w.z * sinangleRad;
+	float unpitchedz = w.y * sinangleRad + w.z * cosangleRad;
+	float unpitchedx = w.x;
+
+	// 2. Inverse Yaw (Reverse of camera.yaw)
+	angleRad = toradian(-camera.yaw);
+	cosangleRad = cos(angleRad), sinangleRad = sin(angleRad);
+
+	float unyawedx = unpitchedx * cosangleRad - unpitchedy * sinangleRad;
+	float unyawedy = unpitchedx * sinangleRad + unpitchedy * cosangleRad;
+	float unyawedz = unpitchedz;
+
+	// 3. Inverse Translate (Add camera position last)
+	return point3d(unyawedx + camera.x, unyawedy + camera.y, unyawedz + camera.z);
+}
+
 void renderTriangle3d(const TriangleToRender& tri)
 {
 	float near_plane = 0.1f;
@@ -638,6 +751,48 @@ public:
 };
 vector<block> worldBlocks;
 
+void renderEquations()
+{
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{
+			bool found = 0;
+
+			point3d currentpos = { camera.x, camera.y, camera.z };
+			point3d pixelpos = transformtoWorldSpace({j - float(col - 1)/2, focalLengthpx, -i + float(row - 1)/2});
+
+			point3d unitVec = (pixelpos - currentpos).normalized();
+
+			for (float d = 0; d <= 13; d += equationRayStep)
+			{
+				currentpos.x += unitVec.x * equationRayStep;
+				currentpos.y += unitVec.y * equationRayStep;
+				currentpos.z += unitVec.z * equationRayStep;
+
+				for (auto& eq : Equations)
+				{
+					if (eq.solve(currentpos))
+					{
+						found = 1;
+
+						screenSet(j, i, '*'); //add shading here later
+						break;
+					}
+				}
+				if (sphere(currentpos) || torus(currentpos, 3, 3, 0) || heart(currentpos, 5, 5, 0, 2))
+				{
+					found = 1;
+
+					screenSet(j, i, '*');
+					break;
+				}
+				if(found) break;
+			}
+		}
+	}
+}
+
 void render()
 {
 	for (auto& blocks : worldBlocks) blocks.add();
@@ -658,6 +813,8 @@ void render()
 	);
 
 	for (const auto& tri : queue) renderTriangle3d(tri);
+
+	renderEquations();
 }
 
 struct raycastResult
@@ -827,7 +984,10 @@ static void load()
 		}
 	}
 	settings.close();
-
+}
+void loadModels()
+{
+	string line;
 	ifstream models;
 	models.open("Models Positions.txt");
 	while (getline(models, line))
@@ -1045,6 +1205,57 @@ void showHello(float x = 0, float y = 0, float z = 0)
 	worldBlocks.emplace_back(x + 22, y, z + 4);
 }
 
+void loadEquations()
+{
+{
+		//Equation eq;
+
+		//float h = 0, k = 0, l = 0, r = 2;
+
+		//eq.coef[2][0][0] = 1;
+		//eq.coef[1][0][0] = -2 * h;
+
+		//eq.coef[0][2][0] = 1;
+		//eq.coef[0][1][0] = -2 * k;
+
+		//eq.coef[0][0][2] = 1;
+		//eq.coef[0][0][1] = -2 * l;
+
+		//eq.coef[0][0][0] = h * h + k * k + l * l - r * r;
+
+		//Equations.emplace_back(eq);
+}
+
+//{
+//		Equation eq;
+//		float R = 0.8, r = 0.3;
+//
+//		eq.coef[4][0][0] = 1;
+//		eq.coef[0][4][0] = 1;
+//		eq.coef[0][0][4] = 1;
+//
+//		eq.coef[2][2][0] = 2;
+//		eq.coef[2][0][2] = 2;
+//		eq.coef[0][2][2] = 2;
+//
+//		eq.coef[2][0][0] = -2 * (R * R + r * r);
+//		eq.coef[0][2][0] = -2 * (R * R + r * r);
+//		eq.coef[0][0][2] = 2 * (R * R - r * r);
+//
+//		eq.coef[0][0][0] = ftoi_power(R * R - r * r, 2);
+//
+//		Equations.emplace_back(eq);
+//}
+
+//{
+//		Equation eq;
+//
+//		eq.coef[0][1][0] = 1;
+//		eq.coef[1][0][0] = 4;
+//		Equations.emplace_back(eq);
+//}
+}
+
 void prepareWorld()
 {
 	
@@ -1056,7 +1267,7 @@ void prepareWorld()
 
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	
-	showHello(-12, 12, 0);
+	//showHello(-12, 12, 0);
 	/*placeHouse(-5, -5, 0);
 	placeHouse(-18, -5, 0);
 
@@ -1095,8 +1306,10 @@ int main()
 	cin.tie(NULL);
 
 	load();
-	constructScreen();
+	//loadModels();
+	loadEquations();
 	prepareWorld();
+	constructScreen();
 
 	cout << "Press Any Key to start. Make sure to resize your terminal before starting.";
 	_getch();
