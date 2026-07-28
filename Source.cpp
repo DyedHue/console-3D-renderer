@@ -371,6 +371,19 @@ protected:
 		return sin(x*x + y*y) - z;
 	}
 };
+class line2D: public equation
+{
+public:
+	float m = 2, c = 3;
+protected:
+	float evaluateLocal(const float x, const float y, const float z) const override
+	{
+		float ans = m * x + c - y;
+		if(z > -0.1 && z < 0.1)
+			return ans;
+		else return ans <= 0? -FLT_MAX: FLT_MAX;
+	}
+};
 vector<unique_ptr<equation>>Equations;
 heart* heartRef;
 
@@ -789,69 +802,23 @@ public:
 };
 vector<block> worldBlocks;
 
-//void renderEquations()
-//{
-//	for (int i = 0; i < row; i++)
-//	{
-//		for (int j = 0; j < col; j++)
-//		{
-//			bool found = 0;
-//
-//			point3d currentPos = { camera.x, camera.y, camera.z };
-//			point3d pixelpos = transformtoWorldSpace({j - float(col - 1)/2, focalLengthpx, -i + float(row - 1)/2});
-//
-//			point3d unitVec = (pixelpos - currentPos).normalized();
-//
-//			bool prevSignSphere = sphere(currentPos) <= 0;
-//			bool prevSignTorus = torus(currentPos, 3, 3, 0) <= 0;
-//			bool prevSignHeart = heart(currentPos, 5, 5, 0, 2) <= 0;
-//
-//			for (float d = 0; d <= 13; d += equationRayStep)
-//			{
-//				currentPos = currentPos + unitVec * equationRayStep;
-//
-//				//for (auto& eq : Equations)
-//				//{
-//				//	if (eq.solve(currentPos))
-//				//	{
-//				//		found = 1;
-//
-//				//		screenSet(j, i, '*'); //add shading here later
-//				//		break;
-//				//	}
-//				//}
-//				bool currentSignSphere = sphere(currentPos) <= 0;
-//				bool currentSignTorus = torus(currentPos, 3, 3, 0) <= 0;
-//				bool currentSignHeart = heart(currentPos, 5, 5, 0, 2) <= 0;
-//
-//				if(currentSignSphere != prevSignSphere || currentSignTorus != prevSignTorus || currentSignHeart != prevSignHeart)
-//				{
-//					found = 1;
-//
-//					screenSet(j, i, '*');
-//				}
-//				if(found) break;
-//				prevSignSphere = currentSignSphere;
-//				prevSignTorus = currentSignTorus;
-//				prevSignHeart = currentSignHeart;
-//			}
-//		}
-//	}
-//}
 void renderEquations()
 {
 	size_t size = Equations.size();
-	vector<char>prevSigns(size), currentSigns(size); //bool
-
+	vector<bool>prevSigns(size), currentSigns(size); //bool
+	vector<float>eqDist(size, -1);
 	chrono::duration<float> totalElapsed = (currentTime - startTime);
 	float totalElapsedSec = totalElapsed.count();
 
-	heartRef->scale = 2.5 + sin(totalElapsedSec * 3.5)/4;
+	heartRef->scale = 2.5 + exp(sin(totalElapsedSec * 6)/4);
 
 	for (int i = 0; i < row; i++)
 	{
 		for (int j = 0; j < col; j++)
 		{
+			int eqMatched = 0;
+			fill(eqDist.begin(), eqDist.end(), -1);
+
 			point3d currentPos = { camera.x, camera.y, camera.z };
 			point3d pixelpos = transformtoWorldSpace({j - float(col - 1)/2, focalLengthpx, -i + float(row - 1)/2});
 
@@ -864,18 +831,41 @@ void renderEquations()
 
 			for (float d = 0; d <= 13; d += equationRayStep)
 			{
+				if(eqMatched == size) break;
+
 				currentPos = currentPos + unitVec * equationRayStep;
 
 				for (int it = 0; it < size; it++)
 				{
-					currentSigns[it] = Equations[it]->evaluate(currentPos) <= 0;
-					if (currentSigns[it] != prevSigns[it])
+					if(eqDist[it] != -1) continue;
+
+					float solution = Equations[it]->evaluate(currentPos);
+					currentSigns[it] = solution <= 0;
+					if (currentSigns[it] != prevSigns[it] && abs(solution) != FLT_MAX)
 					{
-						screenSet(j, i, '*');
-						break;
+						eqDist[it] = d;
+						eqMatched++;
 					}
 				}
 				prevSigns = currentSigns;
+			}
+			int closestIndex = -1;
+			float minn = FLT_MAX;
+
+			for (int it = 0; it < size; it++)
+			{
+				if (eqDist[it] < minn && eqDist[it] != -1)
+				{
+					minn = eqDist[it];
+					closestIndex = it;
+				}
+			}
+
+			if (closestIndex != -1)
+			{
+				point3d camPos = {camera.x, camera.y, camera.z};
+				//Equations[it]->findDerivative(campos + (eqDist[closestIndex] * unitVec)); <--- implement this thing
+				screenSet(j, i, '*');
 			}
 		}
 	}
@@ -1306,7 +1296,7 @@ void loadEquations()
 
 	auto Heart = make_unique<heart>();
 	Heart->pos = {2, -3, 0};
-	Heart->scale = 3;
+	Heart->scale = 2.5;
 	heartRef = Heart.get();
 	Equations.push_back(move(Heart));
 
@@ -1314,6 +1304,8 @@ void loadEquations()
 	//Ripples->pos = {2, -3, 0};
 	//Ripples->scale = 3;
 	//Equations.push_back(move(Ripples));
+	auto line = make_unique<line2D>();
+	Equations.push_back(move(line));
 }
 
 void prepareWorld()
