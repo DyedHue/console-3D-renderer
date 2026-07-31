@@ -48,6 +48,8 @@ vector<vector<bool>> screenpoints;
 float focalLengthpx;
 //const string brightnessSymbols = ".,-~:;=!*#$@";
 const string brightnessSymbols = ".,:-;!~*=#$@";
+//const string brightnessSymbols = " .-~:+=xX$#@WMB8&%Q0OZX";
+//const string brightnessSymbols = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
 const char ch = '*';
 
 map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
@@ -323,7 +325,8 @@ protected:
 	}
 	point3d gradientLocal(const float x, const float y, const float z) const override
 	{
-		return {x, y, z};
+		float dist = sqrt(x*x + y*y);
+		return {2 * x * (1- R/dist), 2 * y * (1- R/dist), 2*z};
 	}
 };
 class heart : public equation
@@ -791,26 +794,77 @@ vector<block> worldBlocks;
 void renderEquations()
 {
 	size_t size = Equations.size();
-	vector<bool>prevSigns(size), currentSigns(size); //bool
-	vector<float>eqDist(size, -1);
+	vector<bool>prevSigns(size), currentSigns(size);
 	
 	chrono::duration<float> totalElapsed = (currentTime - startTime);
 	float totalElapsedSec = totalElapsed.count();
 
 	//heartRef->scale = 2.5 + exp(sin(totalElapsedSec * 6)/4);
 
+
+	point3d startPos = {camera.x, camera.y, camera.z};
+
+	point3d relative00PxPos = {- float(col - 1)/2, focalLengthpx,float(row - 1)/2};
+	point3d relative10PxPos = {0 - float(col - 1)/2, focalLengthpx,-1 + float(row - 1)/2};
+	point3d relative01PxPos = {1 - float(col - 1)/2, focalLengthpx, float(row - 1)/2};
+
+
+	float pitchRad = toradian(-camera.pitch + 90), yawRad = toradian(-camera.yaw);
+	float cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
+	float cosYaw = cos(yawRad), sinYaw = sin(yawRad);
+
+	float pitchedy00 = relative00PxPos.y * cosPitch - relative00PxPos.z * sinPitch;
+	float pitchedz00 = relative00PxPos.y * sinPitch + relative00PxPos.z * cosPitch;
+
+	float pitchedy01 = relative01PxPos.y * cosPitch - relative01PxPos.z * sinPitch;
+	float pitchedz01 = relative01PxPos.y * sinPitch + relative01PxPos.z * cosPitch;
+
+	float pitchedy10 = relative10PxPos.y * cosPitch - relative10PxPos.z * sinPitch;
+	float pitchedz10 = relative10PxPos.y * sinPitch + relative10PxPos.z * cosPitch;
+
+
+	float yawedx00 = relative00PxPos.x * cosYaw - pitchedy00 * sinYaw;
+	float yawedy00 = relative00PxPos.x * sinYaw + pitchedy00 * cosYaw;
+
+	float yawedx01 = relative01PxPos.x * cosYaw - pitchedy01 * sinYaw;
+	float yawedy01 = relative01PxPos.x * sinYaw + pitchedy01 * cosYaw;
+
+	float yawedx10 = relative10PxPos.x * cosYaw - pitchedy10 * sinYaw;
+	float yawedy10 = relative10PxPos.x * sinYaw + pitchedy10 * cosYaw;
+
+
+	point3d _00PxPos = {yawedx00 + camera.x, yawedy00 + camera.y, pitchedz00 + camera.z};
+	point3d _01PxPos = {yawedx01 + camera.x, yawedy01 + camera.y, pitchedz01 + camera.z};
+	point3d _10PxPos = {yawedx10 + camera.x, yawedy10 + camera.y, pitchedz10 + camera.z};
+
+	point3d leftRight1px = _01PxPos - _00PxPos;
+	point3d upDown1px = _10PxPos - _00PxPos;
+
+	vector<vector<point3d>> pixelDirections(row, vector<point3d>(col));
 	for (int i = 0; i < row; i++)
 	{
 		for (int j = 0; j < col; j++)
 		{
+			if (j == 0)
+				if(i == 0)
+					pixelDirections[i][j] = _00PxPos - startPos;
+				else
+					pixelDirections[i][j] = pixelDirections[i - 1][j] + upDown1px;
+			else
+				pixelDirections[i][j] = pixelDirections[i][j - 1] + leftRight1px;
+		}
+	}
+
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{	
+			point3d unitVec = pixelDirections[i][j].normalized();
+
 			int eqMatched = 0;
-			fill(eqDist.begin(), eqDist.end(), -1);
 
-			point3d currentPos = { camera.x, camera.y, camera.z };
-			point3d pixelpos = transformtoWorldSpace({j - float(col - 1)/2, focalLengthpx, -i + float(row - 1)/2});
-
-			point3d unitVec = (pixelpos - currentPos).normalized();
-
+			point3d currentPos = startPos;
+			
 			for (int it = 0; it < size; it++)
 			{
 				prevSigns[it] = Equations[it]->evaluate(currentPos) <= 0;
@@ -819,50 +873,150 @@ void renderEquations()
 			float currentEquationRayStep = equationRayStep;
 			for (float d = 0; d <= renderDistance; d += currentEquationRayStep/*, currentEquationRayStep *= 1.1*/)
 			{
-				if(eqMatched == size) break;
+				bool matched = 0;
 
 				currentPos = currentPos + unitVec * currentEquationRayStep;
 
 				for (int it = 0; it < size; it++)
 				{
-					if(eqDist[it] != -1) continue;
-
 					float solution = Equations[it]->evaluate(currentPos);
 					currentSigns[it] = solution <= 0;
 					if (currentSigns[it] != prevSigns[it] && abs(solution) != FLT_MAX)
 					{
-						eqDist[it] = d;
-						eqMatched++;
+						matched = true;
+
+						point3d camPos = {camera.x, camera.y, camera.z};
+						point3d normal = Equations[it]->gradient(camPos + (unitVec * d));
+
+						float brightness = (((lightdir * -1) * normal) + 1)/2;
+						brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
+
+						debugbrightness = brightness;
+						int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+
+						screenSet(j, i, brightnessSymbols[brightnessIndex]);
+						break;
 					}
 				}
+				if(matched)break;
 				prevSigns = currentSigns;
 			}
-			int closestIndex = -1;
-			float minn = FLT_MAX;
+		}
+	}
+}
+void renderEquations2()
+{
+	size_t size = Equations.size();
 
-			for (int it = 0; it < size; it++)
+	chrono::duration<float> totalElapsed = (currentTime - startTime);
+	float totalElapsedSec = totalElapsed.count();
+
+	//heartRef->scale = 2.5 + exp(sin(totalElapsedSec * 6)/4);
+
+	point3d startPos = {camera.x, camera.y, camera.z};
+
+	point3d relative00PxPos = {- float(col - 1)/2, focalLengthpx,float(row - 1)/2};
+	point3d relative10PxPos = {0 - float(col - 1)/2, focalLengthpx,-1 + float(row - 1)/2};
+	point3d relative01PxPos = {1 - float(col - 1)/2, focalLengthpx, float(row - 1)/2};
+
+
+	float pitchRad = toradian(-camera.pitch + 90), yawRad = toradian(-camera.yaw);
+	float cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
+	float cosYaw = cos(yawRad), sinYaw = sin(yawRad);
+
+	float pitchedy00 = relative00PxPos.y * cosPitch - relative00PxPos.z * sinPitch;
+	float pitchedz00 = relative00PxPos.y * sinPitch + relative00PxPos.z * cosPitch;
+
+	float pitchedy01 = relative01PxPos.y * cosPitch - relative01PxPos.z * sinPitch;
+	float pitchedz01 = relative01PxPos.y * sinPitch + relative01PxPos.z * cosPitch;
+
+	float pitchedy10 = relative10PxPos.y * cosPitch - relative10PxPos.z * sinPitch;
+	float pitchedz10 = relative10PxPos.y * sinPitch + relative10PxPos.z * cosPitch;
+
+
+	float yawedx00 = relative00PxPos.x * cosYaw - pitchedy00 * sinYaw;
+	float yawedy00 = relative00PxPos.x * sinYaw + pitchedy00 * cosYaw;
+
+	float yawedx01 = relative01PxPos.x * cosYaw - pitchedy01 * sinYaw;
+	float yawedy01 = relative01PxPos.x * sinYaw + pitchedy01 * cosYaw;
+
+	float yawedx10 = relative10PxPos.x * cosYaw - pitchedy10 * sinYaw;
+	float yawedy10 = relative10PxPos.x * sinYaw + pitchedy10 * cosYaw;
+
+
+	point3d _00PxPos = {yawedx00 + camera.x, yawedy00 + camera.y, pitchedz00 + camera.z};
+	point3d _01PxPos = {yawedx01 + camera.x, yawedy01 + camera.y, pitchedz01 + camera.z};
+	point3d _10PxPos = {yawedx10 + camera.x, yawedy10 + camera.y, pitchedz10 + camera.z};
+
+	point3d leftRight1px = _01PxPos - _00PxPos;
+	point3d upDown1px = _10PxPos - _00PxPos;
+
+	vector<vector<point3d>> pixelDirections(row, vector<point3d>(col));
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{
+			if (j == 0)
+				if(i == 0)
+					pixelDirections[i][j] = _00PxPos - startPos;
+				else
+					pixelDirections[i][j] = pixelDirections[i - 1][j] + upDown1px;
+			else
+				pixelDirections[i][j] = pixelDirections[i][j - 1] + leftRight1px;
+		}
+	}
+
+	vector<vector<float>> zbuffer(row, vector<float>(col, FLT_MAX));
+	vector<vector<int>> equationIndex(row, vector<int>(col, -1));
+
+	for(int it = 0; it < size; it++)
+	{
+		for (int i = 0; i < row; i++)
+		{
+			for (int j = 0; j < col; j++)
 			{
-				if (eqDist[it] < minn && eqDist[it] != -1)
+				point3d currentPos = startPos;
+
+				bool prevSign = Equations[it]->evaluate(currentPos) <= 0;
+				bool currentSign;
+
+				float currentEquationRayStep = equationRayStep;
+				for (float d = 0; d <= renderDistance && d <= zbuffer[i][j]; d += currentEquationRayStep/*, currentEquationRayStep *= 1.1*/)
 				{
-					minn = eqDist[it];
-					closestIndex = it;
+					currentPos = currentPos + pixelDirections[i][j].normalized() * currentEquationRayStep;
+
+					float solution = Equations[it]->evaluate(currentPos);
+					currentSign = solution <= 0;
+
+					if (currentSign != prevSign && abs(solution) != FLT_MAX)
+					{
+						if(d < zbuffer[i][j])
+						{
+							zbuffer[i][j] = d;
+							equationIndex[i][j] = it;
+						}
+						break;
+					}
+					prevSign = currentSign;
 				}
 			}
+		}
+	}
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{
+			if(equationIndex[i][j] == -1) continue;
 
-			if (closestIndex != -1)
-			{
-				point3d camPos = {camera.x, camera.y, camera.z};
-				point3d normal = Equations[closestIndex]->gradient(camPos + (unitVec * eqDist[closestIndex]));
+			point3d normal = Equations[equationIndex[i][j]]->gradient(startPos + (pixelDirections[i][j].normalized() * zbuffer[i][j]));
 
-				float brightness = (((lightdir * -1) * normal) + 1)/2;
-				//if(brightness > 1 || brightness < 0) brightness = round(brightness);
-				brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
+			float brightness = (((lightdir * -1) * normal) + 1)/2;
+			brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
 
-				debugbrightness = brightness;
-				int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+			debugbrightness = brightness;
+			int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
-				screenSet(j, i, brightnessSymbols[brightnessIndex]);
-			}
+			screenSet(j, i, brightnessSymbols[brightnessIndex]);
 		}
 	}
 }
@@ -1313,7 +1467,7 @@ void loadEquations()
 void prepareWorld()
 {
 	//loadModels();
-	//loadBuiltinBlocks();
+	loadBuiltinBlocks();
 	loadEquations();
 }
 
