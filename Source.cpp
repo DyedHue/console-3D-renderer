@@ -14,6 +14,7 @@
 #include <sstream>
 
 #include <chrono>
+#include <thread>
 #include <windows.h>
 #include <conio.h>
 
@@ -790,8 +791,279 @@ public:
 	}
 };
 vector<block> worldBlocks;
-
 void renderEquations()
+{
+	size_t size = Equations.size();
+
+	chrono::duration<float> totalElapsed = (currentTime - startTime);
+	float totalElapsedSec = totalElapsed.count();
+
+	point3d startPos = {camera.x, camera.y, camera.z};
+
+	point3d relative00PxPos = {- float(col - 1)/2, focalLengthpx,float(row - 1)/2};
+	point3d relative10PxPos = {0 - float(col - 1)/2, focalLengthpx,-1 + float(row - 1)/2};
+	point3d relative01PxPos = {1 - float(col - 1)/2, focalLengthpx, float(row - 1)/2};
+
+	float pitchRad = toradian(-camera.pitch + 90), yawRad = toradian(-camera.yaw);
+	float cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
+	float cosYaw = cos(yawRad), sinYaw = sin(yawRad);
+
+	float pitchedy00 = relative00PxPos.y * cosPitch - relative00PxPos.z * sinPitch;
+	float pitchedz00 = relative00PxPos.y * sinPitch + relative00PxPos.z * cosPitch;
+
+	float pitchedy01 = relative01PxPos.y * cosPitch - relative01PxPos.z * sinPitch;
+	float pitchedz01 = relative01PxPos.y * sinPitch + relative01PxPos.z * cosPitch;
+
+	float pitchedy10 = relative10PxPos.y * cosPitch - relative10PxPos.z * sinPitch;
+	float pitchedz10 = relative10PxPos.y * sinPitch + relative10PxPos.z * cosPitch;
+
+	float yawedx00 = relative00PxPos.x * cosYaw - pitchedy00 * sinYaw;
+	float yawedy00 = relative00PxPos.x * sinYaw + pitchedy00 * cosYaw;
+
+	float yawedx01 = relative01PxPos.x * cosYaw - pitchedy01 * sinYaw;
+	float yawedy01 = relative01PxPos.x * sinYaw + pitchedy01 * cosYaw;
+
+	float yawedx10 = relative10PxPos.x * cosYaw - pitchedy10 * sinYaw;
+	float yawedy10 = relative10PxPos.x * sinYaw + pitchedy10 * cosYaw;
+
+	point3d _00PxPos = {yawedx00 + camera.x, yawedy00 + camera.y, pitchedz00 + camera.z};
+	point3d _01PxPos = {yawedx01 + camera.x, yawedy01 + camera.y, pitchedz01 + camera.z};
+	point3d _10PxPos = {yawedx10 + camera.x, yawedy10 + camera.y, pitchedz10 + camera.z};
+
+	point3d leftRight1px = _01PxPos - _00PxPos;
+	point3d upDown1px = _10PxPos - _00PxPos;
+
+	vector<vector<point3d>> pixelDirections(row, vector<point3d>(col));
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{
+			if (j == 0)
+				if(i == 0)
+					pixelDirections[i][j] = _00PxPos - startPos;
+				else
+					pixelDirections[i][j] = pixelDirections[i - 1][j] + upDown1px;
+			else
+				pixelDirections[i][j] = pixelDirections[i][j - 1] + leftRight1px;
+		}
+	}
+
+	vector<vector<float>> zbuffer(row, vector<float>(col, FLT_MAX));
+	vector<vector<int>> equationIndex(row, vector<int>(col, -1));
+
+	// --- MULTITHREADING SETUP ---
+	int num_threads = std::thread::hardware_concurrency();
+	if (num_threads == 0) num_threads = 4;
+	std::vector<std::thread> threads;
+
+	auto worker = [&](int start_row, int end_row) {
+		for(int it = 0; it < size; it++)
+		{
+			for (int i = start_row; i < end_row; i++)
+			{
+				for (int j = 0; j < col; j++)
+				{
+					point3d currentPos = startPos;
+
+					bool prevSign = Equations[it]->evaluate(currentPos) <= 0;
+					bool currentSign;
+
+					float currentEquationRayStep = equationRayStep;
+					for (float d = 0; d <= renderDistance && d <= zbuffer[i][j]; d += currentEquationRayStep)
+					{
+						currentPos = currentPos + pixelDirections[i][j].normalized() * currentEquationRayStep;
+
+						float solution = Equations[it]->evaluate(currentPos);
+						currentSign = solution <= 0;
+
+						if (currentSign != prevSign && abs(solution) != FLT_MAX)
+						{
+							if(d < zbuffer[i][j])
+							{
+								zbuffer[i][j] = d;
+								equationIndex[i][j] = it;
+							}
+							break;
+						}
+						prevSign = currentSign;
+					}
+				}
+			}
+		}
+
+		for (int i = start_row; i < end_row; i++)
+		{
+			for (int j = 0; j < col; j++)
+			{
+				if(equationIndex[i][j] == -1) continue;
+
+				point3d normal = Equations[equationIndex[i][j]]->gradient(startPos + (pixelDirections[i][j].normalized() * zbuffer[i][j]));
+
+				float brightness = (((lightdir * -1) * normal) + 1)/2;
+				brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
+
+				// Only update debugbrightness on the center pixel to avoid thread data race
+				if (i == row / 2 && j == col / 2) debugbrightness = brightness;
+
+				int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+
+				screenSet(j, i, brightnessSymbols[brightnessIndex]);
+			}
+		}
+		};
+
+	// Split work among threads
+	int chunk_size = row / num_threads;
+	for (int t = 0; t < num_threads; t++) {
+		int start = t * chunk_size;
+		int end = (t == num_threads - 1) ? row : start + chunk_size;
+		threads.emplace_back(worker, start, end);
+	}
+
+	for (auto& t : threads) {
+		t.join();
+	}
+}
+void renderEquations4()
+{
+	size_t size = Equations.size();
+	chrono::duration<float> totalElapsed = (currentTime - startTime);
+	float totalElapsedSec = totalElapsed.count();
+
+	//heartRef->scale = 2.5 + exp(sin(totalElapsedSec * 6)/4);
+
+
+	point3d startPos = {camera.x, camera.y, camera.z};
+
+	point3d relative00PxPos = {- float(col - 1)/2, focalLengthpx,float(row - 1)/2};
+	point3d relative10PxPos = {0 - float(col - 1)/2, focalLengthpx,-1 + float(row - 1)/2};
+	point3d relative01PxPos = {1 - float(col - 1)/2, focalLengthpx, float(row - 1)/2};
+
+
+	float pitchRad = toradian(-camera.pitch + 90), yawRad = toradian(-camera.yaw);
+	float cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
+	float cosYaw = cos(yawRad), sinYaw = sin(yawRad);
+
+	float pitchedy00 = relative00PxPos.y * cosPitch - relative00PxPos.z * sinPitch;
+	float pitchedz00 = relative00PxPos.y * sinPitch + relative00PxPos.z * cosPitch;
+
+	float pitchedy01 = relative01PxPos.y * cosPitch - relative01PxPos.z * sinPitch;
+	float pitchedz01 = relative01PxPos.y * sinPitch + relative01PxPos.z * cosPitch;
+
+	float pitchedy10 = relative10PxPos.y * cosPitch - relative10PxPos.z * sinPitch;
+	float pitchedz10 = relative10PxPos.y * sinPitch + relative10PxPos.z * cosPitch;
+
+
+	float yawedx00 = relative00PxPos.x * cosYaw - pitchedy00 * sinYaw;
+	float yawedy00 = relative00PxPos.x * sinYaw + pitchedy00 * cosYaw;
+
+	float yawedx01 = relative01PxPos.x * cosYaw - pitchedy01 * sinYaw;
+	float yawedy01 = relative01PxPos.x * sinYaw + pitchedy01 * cosYaw;
+
+	float yawedx10 = relative10PxPos.x * cosYaw - pitchedy10 * sinYaw;
+	float yawedy10 = relative10PxPos.x * sinYaw + pitchedy10 * cosYaw;
+
+
+	point3d _00PxPos = {yawedx00 + camera.x, yawedy00 + camera.y, pitchedz00 + camera.z};
+	point3d _01PxPos = {yawedx01 + camera.x, yawedy01 + camera.y, pitchedz01 + camera.z};
+	point3d _10PxPos = {yawedx10 + camera.x, yawedy10 + camera.y, pitchedz10 + camera.z};
+
+	point3d leftRight1px = _01PxPos - _00PxPos;
+	point3d upDown1px = _10PxPos - _00PxPos;
+
+	vector<vector<point3d>> pixelDirections(row, vector<point3d>(col));
+	for (int i = 0; i < row; i++)
+	{
+		for (int j = 0; j < col; j++)
+		{
+			if (j == 0)
+				if(i == 0)
+					pixelDirections[i][j] = _00PxPos - startPos;
+				else
+					pixelDirections[i][j] = pixelDirections[i - 1][j] + upDown1px;
+			else
+				pixelDirections[i][j] = pixelDirections[i][j - 1] + leftRight1px;
+		}
+	}
+	// MULTITHREADING IMPLEMENTATION
+
+	// Determine how many threads the CPU supports (fallback to 4 if unknown)
+	unsigned int numThreads = std::thread::hardware_concurrency();
+	if (numThreads == 0) numThreads = 4;
+
+	std::vector<std::thread> threads;
+
+	// Define the worker function that each thread will execute
+	auto worker = [&](int startRow, int endRow) {
+		// CRITICAL: Each thread must have its own copy of these vectors!
+		vector<bool> prevSigns(size), currentSigns(size);
+
+		for (int i = startRow; i < endRow; i++)
+		{
+			for (int j = 0; j < col; j++)
+			{	
+				point3d unitVec = pixelDirections[i][j].normalized();
+				point3d currentPos = startPos;
+
+				for (int it = 0; it < size; it++)
+				{
+					prevSigns[it] = Equations[it]->evaluate(currentPos) <= 0;
+				}
+
+				float currentEquationRayStep = equationRayStep;
+				for (float d = 0; d <= renderDistance; d += currentEquationRayStep)
+				{
+					bool matched = false;
+
+					currentPos = currentPos + unitVec * currentEquationRayStep;
+
+					for (int it = 0; it < size; it++)
+					{
+						float solution = Equations[it]->evaluate(currentPos);
+						currentSigns[it] = solution <= 0;
+						if (currentSigns[it] != prevSigns[it] && abs(solution) != FLT_MAX)
+						{
+							matched = true;
+
+							point3d camPos = {camera.x, camera.y, camera.z};
+							point3d normal = Equations[it]->gradient(camPos + (unitVec * d));
+
+							float brightness = (((lightdir * -1) * normal) + 1)/2;
+							brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
+
+							debugbrightness = brightness; // Note: Global write race condition (harmless but random)
+							int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+
+							// Thread safe: writing to independent vector rows
+							screenSet(j, i, brightnessSymbols[brightnessIndex]);
+							break;
+						}
+					}
+					if(matched) break;
+					prevSigns = currentSigns;
+				}
+			}
+		}
+		};
+
+	// Split the rows evenly across available threads
+	int rowsPerThread = row / numThreads;
+	for (unsigned int t = 0; t < numThreads; t++)
+	{
+		int startRow = t * rowsPerThread;
+		// Ensure the last thread goes all the way to the end in case of rounding errors
+		int endRow = (t == numThreads - 1) ? row : startRow + rowsPerThread;
+
+		threads.emplace_back(worker, startRow, endRow);
+	}
+
+	// Wait for all threads to finish rendering this frame
+	for (auto& th : threads)
+	{
+		th.join();
+	}
+}
+void renderEquations3()
 {
 	size_t size = Equations.size();
 	vector<bool>prevSigns(size), currentSigns(size);
