@@ -26,12 +26,6 @@
 
 using namespace std;
 
-
-
-float debugbrightness;
-
-
-
 const float PI = 3.141593f;
 
 int row = 100;
@@ -902,9 +896,6 @@ void renderEquations()
 				float brightness = (((lightdir * -1) * normal) + 1)/2;
 				brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
 
-				// Only update debugbrightness on the center pixel to avoid thread data race
-				if (i == row / 2 && j == col / 2) debugbrightness = brightness;
-
 				int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
 				screenSet(j, i, brightnessSymbols[brightnessIndex]);
@@ -1031,7 +1022,6 @@ void renderEquations4()
 							float brightness = (((lightdir * -1) * normal) + 1)/2;
 							brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
 
-							debugbrightness = brightness; // Note: Global write race condition (harmless but random)
 							int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
 							// Thread safe: writing to independent vector rows
@@ -1163,7 +1153,6 @@ void renderEquations3()
 						float brightness = (((lightdir * -1) * normal) + 1)/2;
 						brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
 
-						debugbrightness = brightness;
 						int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
 						screenSet(j, i, brightnessSymbols[brightnessIndex]);
@@ -1285,7 +1274,6 @@ void renderEquations2()
 			float brightness = (((lightdir * -1) * normal) + 1)/2;
 			brightness = brightness > 1? 1: (brightness < 0? 0 : brightness);
 
-			debugbrightness = brightness;
 			int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
 			screenSet(j, i, brightnessSymbols[brightnessIndex]);
@@ -1559,8 +1547,8 @@ void show()
 
 		if (row < LINES)
 		{
-			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f  Brightness: %f",
-				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f), debugbrightness);
+			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
+				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
 		}
 
 		refresh();
