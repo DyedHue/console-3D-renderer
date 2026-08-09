@@ -7,7 +7,8 @@ Check the latest [Release](https://github.com/DyedHue/console-3D-renderer/releas
 After running the exe, maximise the window, use control and scroll bar or `+`/`-` to adjust font size to your liking. It's recommended to use small font.  
   
 Use `wasd` keys to move around, `arrow keys` / mouse to look around, `space` for going up, `ctrl` for going down, `e` / `mouse left click` to place blocks and `q` / `mouse right click` to break them.  
-You can press `o` to save your current position and look direction which will be loaded the next time you run the exe.
+Press `1`-`4` to pick which block material you place next (stone, grass, wood, leaves).  
+You can press `o` to save your current position, look direction, and everything you've built, which will all be loaded the next time you run the exe.
 >[!NOTE]
 >Press Esc to lock/unlock your mouse cursor.
 # How to import models:
@@ -25,5 +26,5 @@ You can include 1 model in one line. Any line works. Any number of model works.
 You can make a comment line by starting with a `#`.
   
 # How to change settings:
-Go to `Settings.txt` within the same directory as the exe.  
-You will see some variables set to a certain value there. You can change those values to your liking.
+Go to `Renderer Settings.txt` within the same directory as the exe.  
+You will see some variables set to a certain value there, including `max_fps` (set to `0` for an uncapped frame rate). You can change those values to your liking.

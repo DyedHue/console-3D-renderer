@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
+#include <functional>
 #include <array>
 
 #include <memory>
@@ -34,6 +37,7 @@ float hfov = 90;
 float camSpeedMouse = 10, camSpeedKeyboard = 60, walkSpeed = 2.5;
 int renderDistance = 30;
 bool useNcurses = true;
+float maxFps = 60; // 0 = uncapped
 
 float equationRayStep = 0.05;
 float equationSolveTolerance = 0.1;
@@ -47,21 +51,39 @@ const string brightnessSymbols = ".,:-;!~*=#$@";
 //const string brightnessSymbols = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
 const char ch = '*';
 
+// Per-material brightness ramps. Blocks pick one of these (keyed by the material char
+// stored on their triangles) so different materials read as visually distinct even
+// under identical lighting, instead of every surface sharing one ramp.
+const unordered_map<char, string> materialRamps = {
+	{'#', ".,:-;!~*=#$@"},   // stone (default)
+	{'"', ".',:;+=*%#@@"},   // grass
+	{'%', ".,-:;=+*%#@@"},   // wood
+	{'&', " .':,;\"*%&@@"},  // leaves
+};
+const string& materialRamp(char material)
+{
+	auto it = materialRamps.find(material);
+	return it != materialRamps.end() ? it->second : brightnessSymbols;
+}
+const vector<char> placeableMaterials = { '#', '"', '%', '&' };
+char selectedMaterial = '#';
+
 map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
 							{' ', false}, {VK_SHIFT, false},
 							{VK_UP, false}, {VK_DOWN, false}, {VK_LEFT, false}, {VK_RIGHT, false},
 							{'E', false}, {'Q', false},
-							{'R', false}, {'O', false}, 
+							{'R', false}, {'O', false},
 	                        {VK_ESCAPE, false},
 	                        {VK_LBUTTON, false}, {VK_RBUTTON, false},
-	                        {'K', false }, {'L', false} };
+	                        {'K', false }, {'L', false},
+	                        {'1', false}, {'2', false}, {'3', false}, {'4', false} };
 map<int, bool> wasPressed = isPressed;
 
 POINT screenCenter;
 float deltaTime = 0;
 bool mouseLocked = 1;
 
-const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=80\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=80\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# Caps how many frames per second the renderer will try to draw, to avoid pinning a CPU core at 100%. Set to 0 for uncapped.\nmax_fps=60\n\n# How far, in blocks, the world is drawn out to. Lower this for better performance in big builds.\nrender_distance=30\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
 const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place the `MyModel.obj` model in (x, y, z) = (0, 3.5, 2.89) with 2 times its base size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
 auto startTime = chrono::high_resolution_clock::now();
 auto currentTime = startTime;
@@ -93,7 +115,7 @@ bool justPressed(int button)
 {
 	return isPressed[button] && !wasPressed[button];
 }
-float ftoi_power(float n, int ex) //only upto 3
+float ftoi_power(float n, int ex)
 {
 	switch (ex)
 	{
@@ -103,6 +125,7 @@ float ftoi_power(float n, int ex) //only upto 3
 		case 3: return n * n * n;
 		case 4: return n * n * n * n;
 		case 5: return n * n * n * n * n;
+		default: return pow(n, ex);
 	}
 }
 // }
@@ -506,7 +529,7 @@ public:
 				while (ss >> segment)
 				{
 					size_t slashPos1 = segment.find('/');
-					int index, normal;
+					int index = 0, normal = 0; // normal stays 0 (-> -1) when the face omits a normal ref
 					if (slashPos1 == string::npos)
 					{
 						index = stoi(segment);
@@ -515,7 +538,7 @@ public:
 					{
 						index = stoi(segment.substr(0, slashPos1));
 						size_t slashPos2 = segment.find('/', slashPos1 + 1);
-						if (slashPos2 != string::npos)
+						if (slashPos2 != string::npos && slashPos2 + 1 < segment.size())
 						{
 							normal = stoi(segment.substr(slashPos2 + 1));
 						}
@@ -541,11 +564,18 @@ public:
 
 					tri.symbol = symbol;
 
+					auto normalAt = [&](int idx) -> point3d
+					{
+						if (idx >= 0 && idx < (int)Normals.size())
+							return Normals[idx];
+						return point3d(0, 0, 1);
+					};
+
 					if (Normals.size() > 0)
 					{
-						tri.n1 = Normals[normalIndices[0]];
-						tri.n2 = Normals[normalIndices[i]];
-						tri.n3 = Normals[normalIndices[i + 1]];
+						tri.n1 = normalAt(normalIndices[0]);
+						tri.n2 = normalAt(normalIndices[i]);
+						tri.n3 = normalAt(normalIndices[i + 1]);
 						tri.setAvgNormal();
 					}
 
@@ -734,9 +764,10 @@ void renderTriangle3d(const TriangleToRender& tri)
 	point3d lightDirinv = lightdir * -1;
 
 	float brightness = (tri.avgNor.normalized() * lightDirinv.normalized() + 1)/2; // 0 to 1
-	int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
+	const string& ramp = materialRamp(tri.symbol);
+	int brightnessIndex = round(brightness * (ramp.length() - 1));
 
-	printTriangle(point1, point2, point3, brightnessSymbols[brightnessIndex]);
+	printTriangle(point1, point2, point3, ramp[brightnessIndex]);
 }
 
 void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch, point3d avgNor = {0, 0, 1})
@@ -750,11 +781,38 @@ void addQuad3d(point3d pointa, point3d pointb, point3d pointc, point3d pointd, c
 	queue.push_back(tri1);
 	queue.push_back(tri2);
 }
+struct VoxelKey
+{
+	int x, y, z;
+	bool operator==(const VoxelKey& other) const { return x == other.x && y == other.y && z == other.z; }
+};
+struct VoxelKeyHash
+{
+	size_t operator()(const VoxelKey& k) const
+	{
+		size_t h = std::hash<int>()(k.x);
+		h ^= std::hash<int>()(k.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		h ^= std::hash<int>()(k.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+// Rebuilt from worldBlocks only when it actually changes (see worldDirty) so block::add()
+// can cull faces shared with a solid neighbor in O(1) instead of the old O(n^2) scan.
+unordered_set<VoxelKey, VoxelKeyHash> occupiedVoxels;
+bool worldDirty = true;
+
 class block
 {
 public:
 	point3d o;
-	block(int x, int y, int z) : o(x, y, z) {}
+	char material;
+	block(int x, int y, int z, char mat = '#') : o(x, y, z), material(mat) {}
+
+	bool hasNeighbor(int dx, int dy, int dz) const
+	{
+		VoxelKey key{ (int)o.x + dx, (int)o.y + dy, (int)o.z + dz };
+		return occupiedVoxels.find(key) != occupiedVoxels.end();
+	}
 
 	void add()
 	{
@@ -768,69 +826,39 @@ public:
 		point3d g(o.x + 1, o.y + 1, o.z + 1);
 		point3d h(o.x, o.y + 1, o.z + 1);
 
-		bool backmatched = 0, bottommatched = 0, leftmatched = 0, rightmatched = 0, topmatched = 0, frontmatched = 0;
-		/*for (int i = 0; i < queue.size(); i++)
-		{
-			if (queue[i].p1 == g && queue[i].p2 == h && queue[i].p3 == e)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				backmatched = 1;
-				i--;
-			}
-			else if (queue[i].p1 == e && queue[i].p2 ==f && queue[i].p3 == a)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				bottommatched = 1;
-				i--;
-			}
-			else if (queue[i].p1 == a && queue[i].p2 == c && queue[i].p3 == e)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				leftmatched = 1;
-				i--;
-			}
-			else if (queue[i].p1 == h && queue[i].p2 == f && queue[i].p3 == d)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				rightmatched = 1;
-				i--;
-			}
-			else if (queue[i].p1 == g && queue[i].p2 == c && queue[i].p3 == h)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				topmatched = 1;
-				i--;
-			}
-			else if (queue[i].p1 == a && queue[i].p2 == b && queue[i].p3 == c)
-			{
-				queue.erase(queue.begin() + i, queue.begin() + i + 2);
-				frontmatched = 1;
-				i--;
-			}
-		}*/
+		// Each flag is true when its face should be skipped: either a solid neighbor
+		// occludes it, or the camera is on the far side of the (axis-aligned) face plane
+		// so it can never be visible — safe for a closed cube regardless of draw order.
+		bool frontmatched = hasNeighbor(0, 1, 0) || camera.y <= o.y + 1;    // +y face
+		bool topmatched = hasNeighbor(0, 0, -1) || camera.z >= o.z;        // -z face
+		bool rightmatched = hasNeighbor(-1, 0, 0) || camera.x >= o.x;      // -x face
+		bool leftmatched = hasNeighbor(1, 0, 0) || camera.x <= o.x + 1;    // +x face
+		bool bottommatched = hasNeighbor(0, 0, 1) || camera.z <= o.z + 1;  // +z face
+		bool backmatched = hasNeighbor(0, -1, 0) || camera.y >= o.y;       // -y face
+
 		if (!frontmatched)
 		{
-			addQuad3d(e, f, g, h, '*', {0, 1, 0}); // +y back
+			addQuad3d(e, f, g, h, material, {0, 1, 0}); // +y back
 		}
 		if (!topmatched)
 		{
-			addQuad3d(a, b, f, e, '.', { 0, 0, 1 });     //-z bottom
+			addQuad3d(a, b, f, e, material, { 0, 0, -1 });     //-z bottom
 		}
 		if (!rightmatched)
 		{
-			addQuad3d(a, d, h, e, '#', { -1, 0, 0 });    //-x left
+			addQuad3d(a, d, h, e, material, { -1, 0, 0 });    //-x left
 		}
 		if (!leftmatched)
 		{
-			addQuad3d(b, c, g, f, '#', { 1, 0, 0 });    //+x right
+			addQuad3d(b, c, g, f, material, { 1, 0, 0 });    //+x right
 		}
 		if (!bottommatched)
 		{
-			addQuad3d(c, d, h, g, '@', { 0, 0, 1 }); // +z top
+			addQuad3d(c, d, h, g, material, { 0, 0, 1 }); // +z top
 		}
 		if (!backmatched)
 		{
-			addQuad3d(a, b, c, d, '*', { 0, -1, 0 });    //-y front
+			addQuad3d(a, b, c, d, material, { 0, -1, 0 });    //-y front
 		}
 	}
 };
@@ -991,7 +1019,25 @@ void renderEquations(bool useMultithreading = true)
 void render()
 {
 	queue.clear();
-	for (auto& blocks : worldBlocks) blocks.add();
+
+	if (worldDirty)
+	{
+		occupiedVoxels.clear();
+		occupiedVoxels.reserve(worldBlocks.size());
+		for (auto& blocks : worldBlocks)
+			occupiedVoxels.insert({ (int)blocks.o.x, (int)blocks.o.y, (int)blocks.o.z });
+		worldDirty = false;
+	}
+
+	float cullDistSq = (float)renderDistance * (float)renderDistance;
+	for (auto& blocks : worldBlocks)
+	{
+		float dx = blocks.o.x + 0.5f - camera.x;
+		float dy = blocks.o.y + 0.5f - camera.y;
+		float dz = blocks.o.z + 0.5f - camera.z;
+		if (dx * dx + dy * dy + dz * dz <= cullDistSq)
+			blocks.add();
+	}
 	for (auto& model : sceneModels) model.addToScene();
 
 	for (auto& tri : queue)
@@ -1060,7 +1106,8 @@ void placeBlock()
 	int y = floor(result.placepos.y);
 	int z = floor(result.placepos.z);
 
-	worldBlocks.emplace_back(x, y, z);
+	worldBlocks.emplace_back(x, y, z, selectedMaterial);
+	worldDirty = true;
 }
 void breakBlock()
 {
@@ -1068,8 +1115,20 @@ void breakBlock()
 	if (result.blockindex == -1) return;
 
 	worldBlocks.erase(worldBlocks.begin() + result.blockindex);
+	worldDirty = true;
 }
 
+static void saveWorld()
+{
+	ofstream worldFile;
+	worldFile.open("World.txt");
+	worldFile << "# Auto-generated by pressing 'O'. One placed block per line: x y z material\n";
+	for (const auto& b : worldBlocks)
+	{
+		worldFile << (int)b.o.x << " " << (int)b.o.y << " " << (int)b.o.z << " " << b.material << "\n";
+	}
+	worldFile.close();
+}
 static void save()
 {
 	ofstream outputFile;
@@ -1080,6 +1139,8 @@ static void save()
 	outputFile << "camera.yaw=" << camera.yaw << "\n";
 	outputFile << "camera.pitch=" << camera.pitch << "\n";
 	outputFile.close();
+
+	saveWorld();
 }
 static void load()
 {
@@ -1168,6 +1229,10 @@ static void load()
 				camSpeedKeyboard = stof(value);
 			else if (key == "walk_speed")
 				walkSpeed = stof(value);
+			else if (key == "max_fps")
+				maxFps = stof(value);
+			else if (key == "render_distance")
+				renderDistance = stoi(value);
 		}
 		catch (const invalid_argument& e)
 		{
@@ -1255,8 +1320,8 @@ void show()
 
 		if (row < LINES)
 		{
-			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f",
-				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f));
+			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f  Block: %c (1-4 to switch)",
+				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f), selectedMaterial);
 		}
 
 		refresh();
@@ -1287,6 +1352,7 @@ void show()
 
 		cout << fullFrame;
 		cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
+			<< " Block: " << selectedMaterial << " (1-4 to switch)"
 			<< "                                        \n";
 	}
 
@@ -1315,6 +1381,13 @@ void action()
 	{
 		mouseLocked = !mouseLocked;
 		//ShowCursor(!mouseLocked);
+	}
+
+	for (size_t i = 0; i < placeableMaterials.size(); i++)
+	{
+		char key = '1' + (char)i;
+		if (justReleased(key))
+			selectedMaterial = placeableMaterials[i];
 	}
 
 	wasPressed = isPressed;
@@ -1421,6 +1494,38 @@ void loadBuiltinBlocks()
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	showHello(-12, 12, 0);
 }
+void loadWorld()
+{
+	string filename = "World.txt";
+	if (!fileExists(filename))
+	{
+		// First run, nothing saved yet: show the built-in demo build.
+		loadBuiltinBlocks();
+		return;
+	}
+
+	ifstream worldFile(filename);
+	string line;
+	while (getline(worldFile, line))
+	{
+		if (line.empty()) continue;
+		if (line.back() == '\r')
+		{
+			line.pop_back();
+		}
+		if (line[0] == '#') continue;
+
+		stringstream ss(line);
+		int x, y, z;
+		string materialToken;
+		if (ss >> x >> y >> z >> materialToken)
+		{
+			char material = materialToken.empty() ? '#' : materialToken[0];
+			worldBlocks.emplace_back(x, y, z, material);
+		}
+	}
+	worldFile.close();
+}
 void loadEquations()
 {
 	auto Sphere = make_unique<sphere>();
@@ -1472,7 +1577,7 @@ void loadEquations()
 void prepareWorld()
 {
 	loadModels();
-	loadBuiltinBlocks();
+	loadWorld();
 	loadEquations();
 }
 
@@ -1547,6 +1652,16 @@ int main()
 		render();
 		show();
 		action();
+
+		if (maxFps > 0)
+		{
+			chrono::duration<float> frameWork = chrono::high_resolution_clock::now() - currentTime;
+			float targetFrameTime = 1.0f / maxFps;
+			if (frameWork.count() < targetFrameTime)
+			{
+				this_thread::sleep_for(chrono::duration<float>(targetFrameTime - frameWork.count()));
+			}
+		}
 	}
 	return 0;
 }
