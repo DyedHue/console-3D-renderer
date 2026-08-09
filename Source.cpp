@@ -93,7 +93,7 @@ bool justPressed(int button)
 {
 	return isPressed[button] && !wasPressed[button];
 }
-float ftoi_power(float n, int ex) //only upto 3
+float ftoi_power(float n, int ex) //only upto 5
 {
 	switch (ex)
 	{
@@ -339,8 +339,11 @@ public:
 
 	point3d transform(const point3d& p) const
 	{
-		point3d newp = point3d{(p.x - pos.x)/scaleAxis.x, (p.y - pos.y)/scaleAxis.y, (p.z - pos.z)/scaleAxis.z} * (1/scale);
+		point3d newp = p;
+
+		newp = newp - pos;
 		newp = unRotatePoint(newp, rot.z, rot.x, rot.y);
+		newp = point3d{newp.x/scaleAxis.x, newp.y/scaleAxis.y, newp.z/scaleAxis.z} * (1/scale);
 
 		return newp;
 	}
@@ -381,7 +384,7 @@ protected:
 	}
 	float evaluateSDFLocal(const float x, const float y, const float z) const override
 	{
-		return (pos - point3d{x, y, z}).magnitude() - (r*scale);
+		return sqrt(x*x + y*y + z*z) - r;
 	}
 	point3d gradientLocal(const float x, const float y, const float z) const override
 	{
@@ -1424,7 +1427,7 @@ void loadBuiltinBlocks()
 void loadEquations()
 {
 	auto Sphere = make_unique<sphere>();
-	Sphere->pos = {0, 0, 0};
+	Sphere->pos = {-0.5, 0, 0};
 	sphereRef = Sphere.get();
 	Equations.push_back(move(Sphere));
 
@@ -1449,7 +1452,8 @@ void loadEquations()
 	//Equations.push_back(move(Sphere));
 
 	auto Torus = make_unique<torus>();
-	Torus->pos = {1, 1, 0};
+	Torus->pos = {2, 0, 0};
+	//Torus->scaleAxis = {2, 1, 1};
 	//Torus->rot = {30, 0, 0};
 	torusRef = Torus.get();
 	Equations.push_back(move(Torus));
@@ -1457,7 +1461,7 @@ void loadEquations()
 	//auto Heart = make_unique<heart>();
 	//Heart->pos = {2, -3, 0};
 	//Heart->scale = 2.5;
-	////Heart->scaleAxis = {3, 1, 1};
+	//Heart->scaleAxis = {3, 1, 1};
 	//heartRef = Heart.get();
 	//Equations.push_back(move(Heart));
 
@@ -1534,15 +1538,16 @@ int main()
 		lightdir.z = sin(sunangle);
 		lightdir.y = cos(sunangle);
 
+		torusRef->rot.x += 30 * deltaTime;
 		//torusRef->rot.x += 30 * deltaTime;
-		torusRef->rot.y += 30 * deltaTime;
 		torusRef->rot.z += 30 * deltaTime;
 
-		sphereRef->rot.x += 30 * deltaTime;
-		sphereRef->rot.z += 30 * deltaTime;
+		//sphereRef->rot.x += 30 * deltaTime;
+		
+		sphereRef->pos = rotatePoint(sphereRef->pos - torusRef->pos, 30 * deltaTime, 0, 0) + torusRef->pos;
 
 		//heartRef->rot.x += 30 * deltaTime;
-		//heartRef->rot.y += 30 * deltaTime;
+		//heartRef->rot.z += 30 * deltaTime;
 
 		render();
 		show();
