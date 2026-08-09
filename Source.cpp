@@ -1267,8 +1267,6 @@ void show()
 #endif
 	if (!(HAS_NCURSES && useNcurses))
 	{
-		setCursorPosition(0, 0);
-
 		string fullFrame = "";
 		fullFrame.reserve(row * (col * 2) + 2*col + 2*row + 10);
 		for (int i = 0; i < col * 2 - 2; i++)
@@ -1287,7 +1285,8 @@ void show()
 			}
 		for (int i = 0; i < col * 2 - 2; i++)
 			fullFrame += "_";
-
+		
+		setCursorPosition(0, 0);
 		cout << fullFrame;
 		cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
 			<< "                                        \n";
@@ -1523,7 +1522,7 @@ int main()
 	auto lastTime = chrono::high_resolution_clock::now();
 	startTime = lastTime;
 
-	float sunangle = 0;
+	float sunangle = 180;
 	while (1)
 	{
 		currentTime = chrono::high_resolution_clock::now();
