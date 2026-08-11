@@ -39,17 +39,38 @@ int renderDistance = 30;
 bool useNcurses = true;
 float maxFps = 60; // 0 = uncapped
 
+// 'F' toggles this. Flying is the original free camera (space/ctrl, no
+// gravity, unchanged). Walking applies gravity, lets space jump, and resolves
+// movement against the world so the player can't clip through blocks.
+bool flyMode = true;
+float verticalVelocity = 0;
+const float GRAVITY = -24.0f;          // blocks/s^2
+const float JUMP_SPEED = 8.0f;         // blocks/s, upward
+const float PLAYER_RADIUS = 0.3f;      // half-width of the collision box
+const float PLAYER_EYE_HEIGHT = 1.5f;  // feet-to-eyes; matches the default spawn z
+const float PLAYER_HEIGHT = 1.7f;      // feet-to-top-of-head
+// Defined once occupiedVoxels exists; declared here so Camera::positionMove
+// (which comes first in the file) can call it.
+bool playerCollidesAt(float x, float y, float z);
+
 float equationRayStep = 0.05;
 float equationSolveTolerance = 0.1;
 
 vector<vector<char>> screen;
 vector<vector<bool>> screenpoints;
+// Parallel to `screen`: which material produced each cell's character, so the
+// ncurses render path (see colorPairFor/show()) can color it. The plain-cout
+// fallback ignores this entirely — it has no concept of color.
+vector<vector<char>> screenMaterial;
 float focalLengthpx;
 //const string brightnessSymbols = ".,-~:;=!*#$@";
 const string brightnessSymbols = ".,:-;!~*=#$@";
 //const string brightnessSymbols = " .-~:+=xX$#@WMB8&%Q0OZX";
 //const string brightnessSymbols = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
 const char ch = '*';
+// The target-block wireframe's character (see drawTargetOutline). Declared up
+// here, not next to that function, because colorPairFor needs it too.
+const char OUTLINE_CHAR = '+';
 
 // Per-material brightness ramps. Blocks pick one of these (keyed by the material char
 // stored on their triangles) so different materials read as visually distinct even
@@ -68,6 +89,24 @@ const string& materialRamp(char material)
 const vector<char> placeableMaterials = { '#', '"', '%', '&' };
 char selectedMaterial = '#';
 
+// Curses color-pair IDs per material/equation/UI-overlay tag. Set up (or not,
+// on a terminal without color) in main()'s ncurses init block; colorsAvailable
+// gates show() from ever asking curses for a pair it never registered.
+bool colorsAvailable = false;
+int colorPairFor(char tag)
+{
+	switch (tag)
+	{
+	case '#': return 1; // stone (also the default for OBJ models, and anything untagged)
+	case '"': return 2; // grass
+	case '%': return 3; // wood
+	case '&': return 4; // leaves
+	case 'S': return 5; // sphere equation
+	case 'T': return 6; // torus equation
+	default: return tag == OUTLINE_CHAR ? 7 : 1;
+	}
+}
+
 map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', false}, {VK_CONTROL, false},
 							{' ', false}, {VK_SHIFT, false},
 							{VK_UP, false}, {VK_DOWN, false}, {VK_LEFT, false}, {VK_RIGHT, false},
@@ -76,7 +115,8 @@ map<int, bool>isPressed = { {'W', false}, {'S', false}, {'A', false}, {'D', fals
 	                        {VK_ESCAPE, false},
 	                        {VK_LBUTTON, false}, {VK_RBUTTON, false},
 	                        {'K', false }, {'L', false},
-	                        {'1', false}, {'2', false}, {'3', false}, {'4', false} };
+	                        {'1', false}, {'2', false}, {'3', false}, {'4', false},
+	                        {'F', false} };
 map<int, bool> wasPressed = isPressed;
 
 POINT screenCenter;
@@ -105,6 +145,7 @@ void constructScreen()
 {
 	screen.assign(row, vector<char>(col, ' '));
 	screenpoints.assign(row, vector<bool>(col, false));
+	screenMaterial.assign(row, vector<char>(col, '#'));
 	focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 }
 bool justReleased(int button)
@@ -254,22 +295,58 @@ public:
 			moveVec.x++;
 		if(isPressed['A'])
 			moveVec.x--;
-		if(isPressed[' '])
-			moveVec.z++;
-		if(isPressed[VK_CONTROL])
-			moveVec.z--;
 
 		float sinyaw = sin(toradian(yaw)), cosyaw = cos(toradian(yaw));
 		float newx = moveVec.x * cosyaw + moveVec.y * sinyaw;
 		float newy = -moveVec.x * sinyaw + moveVec.y * cosyaw;
 
-		moveVec = {newx, newy, moveVec.z};
-		moveVec = moveVec.normalized();
+		if (flyMode)
+		{
+			if (isPressed[' '])
+				moveVec.z++;
+			if (isPressed[VK_CONTROL])
+				moveVec.z--;
 
+			moveVec = {newx, newy, moveVec.z};
+			moveVec = moveVec.normalized();
+
+			float moveAmount = walkSpeed * deltaTime * (1 + 2 * isPressed[VK_SHIFT]);
+			x += moveVec.x * moveAmount;
+			y += moveVec.y * moveAmount;
+			z += moveVec.z * moveAmount;
+			verticalVelocity = 0; // no momentum carried into the next time walk mode is entered
+			return;
+		}
+
+		// Walk mode: horizontal input is collision-resolved per axis (so sliding
+		// along a wall works instead of stopping dead), and z is gravity-driven
+		// rather than a direct input.
+		point3d horizontal = point3d(newx, newy, 0).normalized();
 		float moveAmount = walkSpeed * deltaTime * (1 + 2 * isPressed[VK_SHIFT]);
-		x += moveVec.x * moveAmount;
-		y += moveVec.y * moveAmount;
-		z += moveVec.z * moveAmount;
+
+		// Probed 0.05 below the feet rather than exactly at them — right at the
+		// feet is the boundary between "standing on" and "not touching", and
+		// floor() rounding on that boundary is exactly where it isn't reliable.
+		bool grounded = playerCollidesAt(x, y, z - 0.05f);
+		if (grounded && isPressed[' '])
+		{
+			verticalVelocity = JUMP_SPEED;
+		}
+		else
+		{
+			verticalVelocity += GRAVITY * deltaTime;
+			if (grounded && verticalVelocity < 0)
+				verticalVelocity = 0;
+		}
+
+		float dx = horizontal.x * moveAmount;
+		float dy = horizontal.y * moveAmount;
+		float dz = verticalVelocity * deltaTime;
+
+		if (dx != 0 && !playerCollidesAt(x + dx, y, z)) x += dx;
+		if (dy != 0 && !playerCollidesAt(x, y + dy, z)) y += dy;
+		if (!playerCollidesAt(x, y, z + dz)) z += dz;
+		else verticalVelocity = 0;
 	}
 	point3d unitVector()
 	{
@@ -357,6 +434,10 @@ public:
 	point3d rot{0, 0, 0};
 	point3d scaleAxis{1, 1, 1};
 	float scale = 1;
+	// Which curses color the ncurses render path tints this shape with (see
+	// colorPairFor). Set per-instance in loadEquations so different shapes
+	// read as visually distinct, the same way block materials do.
+	char colorTag = '#';
 
 	virtual ~Equation() = default;
 
@@ -602,13 +683,14 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-void screenSet(int x, int y, char c = ch)
+void screenSet(int x, int y, char c = ch, char material = '#')
 {
 	int _row = y, _col = x;
 
 	if (_row < row && _row >= 0 && _col < col && _col >= 0)
 	{
 		screen[_row][_col] = c;
+		screenMaterial[_row][_col] = material;
 	}
 }
 void screenPointSet(int x, int y, bool clamp = 1)
@@ -636,7 +718,7 @@ void screenPointSet(int x, int y, bool clamp = 1)
 	}
 }
 
-void pointConnect(const point &point1, const point &point2, bool show = 0)
+void pointConnect(const point &point1, const point &point2, bool show = 0, char drawChar = ch)
 {
 	float x1, y1, x2, y2;
 
@@ -644,7 +726,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 	x2 = point2.y;
 	y1 = point1.x;
 	y2 = point2.x;
-	
+
 	if (x1 == x2 && y1 == y2) return;
 
 	if (x1 == x2)
@@ -652,7 +734,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 		for (int i = min(y1, y2); i <= max(y1, y2); i++)
 		{
 			screenPointSet(x1, i);
-			if (show) screenSet(x1, i);
+			if (show) screenSet(x1, i, drawChar, drawChar);
 		}
 	}
 	else if (y1 == y2)
@@ -660,7 +742,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 		for (int i = min(x1, x2); i <= max(x1, x2); i++)
 		{
 			screenPointSet(i, y1);
-			if (show) screenSet(i, y1);
+			if (show) screenSet(i, y1, drawChar, drawChar);
 		}
 	}
 	else
@@ -676,7 +758,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 				int y = round(m * i + c);
 
 				screenPointSet(i, y);
-				if (show) screenSet(i, y);
+				if (show) screenSet(i, y, drawChar, drawChar);
 			}
 		}
 		else
@@ -686,13 +768,13 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 				int x = round(minv * (i - c));
 
 				screenPointSet(x, i);
-				if (show) screenSet(x, i);
+				if (show) screenSet(x, i, drawChar, drawChar);
 			}
 		}
 	}
 }
 
-void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch)
+void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch, char material = '#')
 {
 	for (auto& rowVec : screenpoints)
 		fill(rowVec.begin(), rowVec.end(), false);
@@ -723,12 +805,14 @@ void printTriangle(const point &point1, const point &point2, const point &point3
 					for (int count = j; count <= it; count++)
 					{
 						screen[i][count] = c;
+						screenMaterial[i][count] = material;
 					}
 					j = it - 1;
 				}
 				else
 				{
 					screen[i][j] = c;
+					screenMaterial[i][j] = material;
 				}
 			}
 		}
@@ -767,7 +851,7 @@ void renderTriangle3d(const TriangleToRender& tri)
 	const string& ramp = materialRamp(tri.symbol);
 	int brightnessIndex = round(brightness * (ramp.length() - 1));
 
-	printTriangle(point1, point2, point3, ramp[brightnessIndex]);
+	printTriangle(point1, point2, point3, ramp[brightnessIndex], tri.symbol);
 }
 
 void addTriangle3d(point3d pointa, point3d pointb, point3d pointc, char c = ch, point3d avgNor = {0, 0, 1})
@@ -800,6 +884,32 @@ struct VoxelKeyHash
 // can cull faces shared with a solid neighbor in O(1) instead of the old O(n^2) scan.
 unordered_set<VoxelKey, VoxelKeyHash> occupiedVoxels;
 bool worldDirty = true;
+
+bool blockSolidAt(int bx, int by, int bz)
+{
+	return occupiedVoxels.find({ bx, by, bz }) != occupiedVoxels.end();
+}
+
+// Player as an axis-aligned box: PLAYER_RADIUS around (x,y), PLAYER_HEIGHT
+// tall with feet at z - PLAYER_EYE_HEIGHT. True if that box overlaps any
+// solid voxel. occupiedVoxels is rebuilt at the start of every render(), and
+// this is only ever called later in the same frame (from action()), so it's
+// always current for the frame it's used in.
+bool playerCollidesAt(float px, float py, float pz)
+{
+	float feetZ = pz - PLAYER_EYE_HEIGHT;
+	float topZ = feetZ + PLAYER_HEIGHT;
+
+	int minX = (int)floor(px - PLAYER_RADIUS), maxX = (int)floor(px + PLAYER_RADIUS);
+	int minY = (int)floor(py - PLAYER_RADIUS), maxY = (int)floor(py + PLAYER_RADIUS);
+	int minZ = (int)floor(feetZ), maxZ = (int)floor(topZ - 0.001f);
+
+	for (int bx = minX; bx <= maxX; bx++)
+		for (int by = minY; by <= maxY; by++)
+			for (int bz = minZ; bz <= maxZ; bz++)
+				if (blockSolidAt(bx, by, bz)) return true;
+	return false;
+}
 
 class block
 {
@@ -985,7 +1095,7 @@ void renderEquations(bool useMultithreading = true)
 
 					int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
-					screenSet(j, i, brightnessSymbols[brightnessIndex]);
+					screenSet(j, i, brightnessSymbols[brightnessIndex], Equations[equationIndex[i][j]]->colorTag);
 				}
 			}
 		};
@@ -1116,6 +1226,49 @@ void breakBlock()
 
 	worldBlocks.erase(worldBlocks.begin() + result.blockindex);
 	worldDirty = true;
+}
+
+/**
+ * Wireframe the block E/Q would currently affect, so aiming has visible
+ * feedback instead of placing/breaking blind. Draws straight into the screen
+ * buffer as the very last step of a frame, which makes it always render on
+ * top regardless of the painter's-algorithm draw order used for everything
+ * else — appropriate here since raycast() already guarantees this is the
+ * first solid block along the view ray, so nothing should be in front of it.
+ */
+void drawTargetOutline()
+{
+	raycastResult result = raycast(true);
+	if (result.blockindex < 0 || result.blockindex >= (int)worldBlocks.size()) return;
+
+	point3d o = worldBlocks[result.blockindex].o;
+	point3d corners[8] = {
+		{o.x,     o.y,     o.z}, {o.x + 1, o.y,     o.z}, {o.x + 1, o.y + 1, o.z}, {o.x,     o.y + 1, o.z},
+		{o.x, o.y, o.z + 1}, {o.x + 1, o.y, o.z + 1}, {o.x + 1, o.y + 1, o.z + 1}, {o.x, o.y + 1, o.z + 1},
+	};
+
+	const float near_plane = 0.1f;
+	point projected[8];
+	bool visible[8];
+	for (int i = 0; i < 8; i++)
+	{
+		point3d cam = transformtoCamSpace(corners[i]);
+		visible[i] = cam.y >= near_plane;
+		if (visible[i])
+			projected[i] = point(project3d(cam, 'x'), project3d(cam, 'y'));
+	}
+
+	static const int edges[12][2] = {
+		{0, 1}, {1, 2}, {2, 3}, {3, 0}, // bottom face
+		{4, 5}, {5, 6}, {6, 7}, {7, 4}, // top face
+		{0, 4}, {1, 5}, {2, 6}, {3, 7}, // verticals joining them
+	};
+
+	for (auto& e : edges)
+	{
+		if (visible[e[0]] && visible[e[1]])
+			pointConnect(projected[e[0]], projected[e[1]], true, OUTLINE_CHAR);
+	}
 }
 
 static void saveWorld()
@@ -1311,7 +1464,10 @@ void show()
 				if (i >= LINES || term_x >= COLS) break;
 
 				char ch = screen[i][j];
+				int pair = colorsAvailable ? colorPairFor(screenMaterial[i][j]) : 0;
+				if (pair) attron(COLOR_PAIR(pair));
 				mvaddch(i + 1, term_x, ch);
+				if (pair) attroff(COLOR_PAIR(pair));
 
 				if(j != col - 2)
 					term_x += 2;
@@ -1320,8 +1476,9 @@ void show()
 
 		if (row < LINES)
 		{
-			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f  Block: %c (1-4 to switch)",
-				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f), selectedMaterial);
+			mvprintw(row + 2, 0, "Position: %.2f %.2f %.2f  Yaw: %.1f Pitch: %.1f  FPS: %.1f  Block: %c (1-4 to switch)  %s (F to toggle)",
+				camera.x, camera.y, camera.z, camera.yaw, camera.pitch, (deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f),
+				selectedMaterial, flyMode ? "Flying" : "Walking");
 		}
 
 		refresh();
@@ -1353,6 +1510,7 @@ void show()
 		cout << fullFrame;
 		cout << "\nPosition: " << camera.x << " " << camera.y << " " << camera.z << " Yaw: " << camera.yaw << " Pitch: " << camera.pitch << " FPS: " << 1/deltaTime
 			<< " Block: " << selectedMaterial << " (1-4 to switch)"
+			<< " " << (flyMode ? "Flying" : "Walking") << " (F to toggle)"
 			<< "                                        \n";
 	}
 
@@ -1382,6 +1540,8 @@ void action()
 		mouseLocked = !mouseLocked;
 		//ShowCursor(!mouseLocked);
 	}
+	else if (justReleased('F'))
+		flyMode = !flyMode;
 
 	for (size_t i = 0; i < placeableMaterials.size(); i++)
 	{
@@ -1485,6 +1645,18 @@ void showHello(float x = 0, float y = 0, float z = 0)
 	worldBlocks.emplace_back(x + 22, y, z + 4);
 }
 
+// A flat grass layer at z=-1, so the top surface sits at z=0 — exactly where
+// Camera's default spawn (z=1.5) already implied a floor to stand on, even
+// though nothing was ever there to stand on. Ordinary blocks in every way:
+// diggable, buildable-on, and saved/reloaded through World.txt like anything
+// else placed by hand, so holes dug into it stay dug.
+void generateGround()
+{
+	const int GROUND_HALF = 15;
+	for (int gx = -GROUND_HALF; gx < GROUND_HALF; gx++)
+		for (int gy = -GROUND_HALF; gy < GROUND_HALF; gy++)
+			worldBlocks.emplace_back(gx, gy, -1, '"');
+}
 void loadBuiltinBlocks()
 {
 	/*placeHouse(-5, -5, 0);
@@ -1492,6 +1664,7 @@ void loadBuiltinBlocks()
 
 	placeTree(-24, -7, 0);*/
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
+	generateGround();
 	showHello(-12, 12, 0);
 }
 void loadWorld()
@@ -1530,6 +1703,7 @@ void loadEquations()
 {
 	auto Sphere = make_unique<sphere>();
 	Sphere->pos = {0, 0, 0};
+	Sphere->colorTag = 'S';
 	sphereRef = Sphere.get();
 	Equations.push_back(move(Sphere));
 
@@ -1556,6 +1730,7 @@ void loadEquations()
 	auto Torus = make_unique<torus>();
 	Torus->pos = {1, 1, 0};
 	//Torus->rot = {30, 0, 0};
+	Torus->colorTag = 'T';
 	torusRef = Torus.get();
 	Equations.push_back(move(Torus));
 
@@ -1610,6 +1785,24 @@ int main()
 		row = LINES - 3;
 		col = COLS/2;
 		constructScreen();
+
+		// 3. Color, if the terminal actually supports it. Pair numbers here
+		// must line up with colorPairFor's returns. Black background rather
+		// than -1/default: PDCurses on Windows doesn't reliably support
+		// "use the terminal's existing background" the way ncurses on a real
+		// tty does.
+		if (has_colors())
+		{
+			start_color();
+			init_pair(1, COLOR_WHITE, COLOR_BLACK);   // stone
+			init_pair(2, COLOR_GREEN, COLOR_BLACK);   // grass
+			init_pair(3, COLOR_YELLOW, COLOR_BLACK);  // wood
+			init_pair(4, COLOR_CYAN, COLOR_BLACK);    // leaves — no dark green in the base 8 colors
+			init_pair(5, COLOR_BLUE, COLOR_BLACK);    // sphere equation
+			init_pair(6, COLOR_MAGENTA, COLOR_BLACK); // torus equation
+			init_pair(7, COLOR_RED, COLOR_BLACK);     // targeted-block outline
+			colorsAvailable = true;
+		}
 	}
 #endif
 
@@ -1650,6 +1843,7 @@ int main()
 		//heartRef->rot.y += 30 * deltaTime;
 
 		render();
+		drawTargetOutline();
 		show();
 		action();
 

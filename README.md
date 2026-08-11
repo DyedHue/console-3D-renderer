@@ -6,11 +6,14 @@ Check the latest [Release](https://github.com/DyedHue/console-3D-renderer/releas
 # How to use:
 After running the exe, maximise the window, use control and scroll bar or `+`/`-` to adjust font size to your liking. It's recommended to use small font.  
   
-Use `wasd` keys to move around, `arrow keys` / mouse to look around, `space` for going up, `ctrl` for going down, `e` / `mouse left click` to place blocks and `q` / `mouse right click` to break them.  
-Press `1`-`4` to pick which block material you place next (stone, grass, wood, leaves).  
+Use `wasd` keys to move around, `arrow keys` / mouse to look around, `e` / `mouse left click` to place blocks and `q` / `mouse right click` to break them.  
+Press `1`-`4` to pick which block material you place next (stone, grass, wood, leaves) — the block you're aiming at is outlined so you can see what you're about to affect.  
+Press `f` to switch between flying (`space`/`ctrl` to go up/down, no gravity) and walking (`space` to jump, gravity, and you can't walk through blocks).  
 You can press `o` to save your current position, look direction, and everything you've built, which will all be loaded the next time you run the exe.
 >[!NOTE]
 >Press Esc to lock/unlock your mouse cursor.
+>
+>If your terminal supports color, materials and the raymarched shapes render in distinct colors instead of plain grayscale ASCII.
 # How to import models:
 You can import 3D models as `.obj` files only. Keep your obj file in the same directory as the exe.  
 1. Go to `Models Positions.txt` within the same directory as the exe.
