@@ -28,6 +28,9 @@ using namespace std;
 
 const float PI = 3.141593f;
 
+const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=80\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
+const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place the `MyModel.obj` model in (x, y, z) = (0, 3.5, 2.89) with 2 times its base size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
+
 int row = 100;
 int col = 222; //displayed column number is 2 less than this
 float hfov = 90;
@@ -39,7 +42,6 @@ float equationRayStep = 0.05;
 float equationSolveTolerance = 0.1;
 
 vector<vector<char>> screen;
-vector<vector<bool>> screenpoints;
 float focalLengthpx;
 //const string brightnessSymbols = ".,-~:;=!*#$@";
 const string brightnessSymbols = ".,:-;!~*=#$@";
@@ -61,8 +63,6 @@ POINT screenCenter;
 float deltaTime = 0;
 bool mouseLocked = 1;
 
-const string defaultSettingsText = "# FOV is the Field of View. The higher the FOV, the more you can see on the screen, but the more distorted the image will be.\nfov=90\n\n#blocks/s and degrees/s\nwalk_speed=2.5\ncam_speed_mouse=10\ncam_speed_keyboard=80\n\n# Makes screen refresh and mouse inputs better. But if it doesn't work properly, disable it.\nuse_ncurses=1\n\n# row is the number of rows that will be used to show the output in text. Same for col for columns.\n# This will be ignored when running with Ncurses enabled as it will dynamically adjust that.\nrow=110\ncol=220\n\n# If you mess up any settings, you can delete this text file to reset everything to default.";
-const string defaultModelspositionsText = "# You can import 3D models here as `.obj` files only. Keep your obj file in the same directory as the exe.\n# 1. Go to `Models Positions.txt` within the same directory as the exe.\n# 2. First type the name of the file (including `.obj`).\n# 3. After a space, type the x, y and z coordinates (positive z is up) of your desired position to place the model at, each separated by space.\n# 4. After another space, type the **scale** of the object (1 means original size).\n\n# More briefly: `{filename.obj} {x} {y} {z} {scale}`\n\n# For example : `MyModel.obj 0 3.5 2.89 2` is going to place the `MyModel.obj` model in (x, y, z) = (0, 3.5, 2.89) with 2 times its base size.\n\n# You can include 1 model in one line. Any line works. Any number of model works.\n# You can make a comment line by starting with a `#`.\n\n";
 auto startTime = chrono::high_resolution_clock::now();
 auto currentTime = startTime;
 
@@ -82,7 +82,6 @@ void setCursorPosition(int x, int y)
 void constructScreen()
 {
 	screen.assign(row, vector<char>(col, ' '));
-	screenpoints.assign(row, vector<bool>(col, false));
 	focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
 }
 bool justReleased(int button)
@@ -119,6 +118,7 @@ public:
 		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
 	}
 };
+
 class point3d
 {
 public:
@@ -177,6 +177,8 @@ public:
 	float yaw = 0;  //degrees, towards y positive (North) = 0, right = positive until 360
 	float pitch = 90; //degrees, up = 0, down = 180, straight = 90
 	float roll = 0; //degrees, when facing y positive, clockwise is positive
+
+	float sinYaw, sinPitch, sinRoll, cosYaw, cosPitch, cosRoll;
 
 	void directionMove()
 	{
@@ -261,6 +263,11 @@ public:
 
 		return { x, y, z };
 	}
+	void updateSinCos()
+	{
+		float yawRad = toradian(yaw), pitchRad = toradian(pitch - 90), rollRad = toradian(roll);
+		sinYaw = sin(yawRad), sinPitch = sin(pitchRad), sinRoll = sin(rollRad), cosYaw = cos(yawRad), cosPitch = cos(pitchRad), cosRoll = cos(rollRad);
+	}
 };
 Camera camera;
 
@@ -282,13 +289,22 @@ vector<TriangleToRender> queue;
 
 point3d rotatePoint(const point3d &p, float yaw = camera.yaw, float pitch = camera.pitch - 90, float roll = camera.roll)
 {
-	float yawRad = toradian(yaw), pitchRad = toradian(pitch), rollRad = toradian(roll);
+	float yawRad, pitchRad, rollRad;
+	float cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll;
 
-	float cosYaw = cos(yawRad), sinYaw = sin(yawRad);
-	float cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
-	float cosRoll = cos(rollRad), sinRoll = sin(rollRad);
+	if (yaw == camera.yaw && pitch == camera.pitch - 90 && roll == camera.roll)
+	{
+		sinYaw = camera.sinYaw, cosYaw = camera.cosYaw, sinPitch = camera.sinPitch, cosPitch = camera.cosPitch, sinRoll = camera.sinRoll, cosRoll = camera.cosRoll;
+	}
+	else
+	{
+		yawRad = toradian(yaw), pitchRad = toradian(pitch), rollRad = toradian(roll);
 
-
+		cosYaw = cos(yawRad), sinYaw = sin(yawRad);
+		cosPitch = cos(pitchRad), sinPitch = sin(pitchRad);
+		cosRoll = cos(rollRad), sinRoll = sin(rollRad);
+	}
+	
 	float yawedx = p.x * cosYaw - p.y * sinYaw;
 	float yawedy = p.x * sinYaw + p.y * cosYaw;
 	float yawedz = p.z;
@@ -433,12 +449,13 @@ protected:
 		return {2 * x * (common - zzz), y * (common * 4.5f - 0.09f * zzz), common * 2 * z - 3 * zz * (xx + 0.045f * yy)};
 	}
 };
-class ripples : public Equation
+class goursatTangle : public Equation
 {
 protected:
 	float evaluateLocal(const float x, const float y, const float z) const override
 	{
-		return sin(x*x + y*y) - z;
+		float xx = x*x, yy = y*y, zz = z*z;
+		return 0.5 * (xx*xx + yy*yy + zz*zz) - 8 * (xx + yy + zz) + 60;
 	}
 	float evaluateSDFLocal(const float x, const float y, const float z) const override
 	{
@@ -449,11 +466,49 @@ protected:
 		return {x, y, z};
 	}
 };
+class shape1:public Equation
+{
+public:
+	float a = 0;
+protected:
+	float evaluateLocal(const float x, const float y, const float z) const override
+	{
+		return x*x + y*y + z*z + sin(4*x) + sin(4*y) + sin(4*z) - a;
+	}
+	float evaluateSDFLocal(const float x, const float y, const float z) const override
+	{
+		return FLT_MAX;
+	}
+	point3d gradientLocal(const float x, const float y, const float z) const override
+	{
+		return {2*x + 4 * cos(4*x), 2*y + 4 * cos(4*y), 2*z + 4 * cos(4*z)};
+	}
+};
+class pipe:public Equation
+{
+public:
+	float r = 1;
+protected:
+	float evaluateLocal(const float x, const float y, const float z) const override
+	{
+		return x*x + z*z - r*r;
+	}
+	float evaluateSDFLocal(const float x, const float y, const float z) const override
+	{
+		return sqrt(x*x + z*z) - r;
+	}
+	point3d gradientLocal(const float x, const float y, const float z) const override
+	{
+		return {2*x, 0, 2*z};
+	}
+};
+
 
 vector<unique_ptr<Equation>>Equations;
 heart* heartRef;
 torus* torusRef;
 sphere* sphereRef;
+shape1* shape1Ref;
 
 class Model
 {
@@ -575,7 +630,7 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-void screenSet(int x, int y, char c = ch)
+void screenSet(int x, int y, char c = ch, bool clamp = 0)
 {
 	int _row = y, _col = x;
 
@@ -583,33 +638,24 @@ void screenSet(int x, int y, char c = ch)
 	{
 		screen[_row][_col] = c;
 	}
-}
-void screenPointSet(int x, int y, bool clamp = 1)
-{
-	int _row = y, _col = x;
 
-	if (_row < row && _row >= 0 && _col < col && _col >= 0)
-	{
-		screenpoints[_row][_col] = 1;
-		return;
-	}
 	if (clamp)
 	{
 		if (_row < row && _row >= 0)
 		{
 			if (_col < 0)
 			{
-				screenpoints[_row][0] = 1;
+				screen[_row][0] = '1';
 			}
 			else if (_col >= col)
 			{
-				screenpoints[_row][col - 1] = 1;
+				screen[_row][col - 1] = '1';
 			}
 		}
 	}
 }
 
-void pointConnect(const point &point1, const point &point2, bool show = 0)
+void pointConnect(const point &point1, const point &point2)
 {
 	float x1, y1, x2, y2;
 
@@ -617,23 +663,21 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 	x2 = point2.y;
 	y1 = point1.x;
 	y2 = point2.x;
-	
+
 	if (x1 == x2 && y1 == y2) return;
 
 	if (x1 == x2)
 	{
 		for (int i = min(y1, y2); i <= max(y1, y2); i++)
 		{
-			screenPointSet(x1, i);
-			if (show) screenSet(x1, i);
+			screenSet(x1, i, '1', 1);
 		}
 	}
 	else if (y1 == y2)
 	{
 		for (int i = min(x1, x2); i <= max(x1, x2); i++)
 		{
-			screenPointSet(i, y1);
-			if (show) screenSet(i, y1);
+			screenSet(i, y1, '1', 1);
 		}
 	}
 	else
@@ -648,8 +692,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 			{
 				int y = round(m * i + c);
 
-				screenPointSet(i, y);
-				if (show) screenSet(i, y);
+				screenSet(i, y, '1', 1);
 			}
 		}
 		else
@@ -658,8 +701,7 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 			{
 				int x = round(minv * (i - c));
 
-				screenPointSet(x, i);
-				if (show) screenSet(x, i);
+				screenSet(x, i, '1', 1);
 			}
 		}
 	}
@@ -667,9 +709,6 @@ void pointConnect(const point &point1, const point &point2, bool show = 0)
 
 void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch)
 {
-	for (auto& rowVec : screenpoints)
-		fill(rowVec.begin(), rowVec.end(), false);
-
 	pointConnect(point1, point2);
 	pointConnect(point2, point3);
 	pointConnect(point3, point1);
@@ -677,15 +716,23 @@ void printTriangle(const point &point1, const point &point2, const point &point3
 
 	for (int i = 0; i < row; i++)
 	{
+		bool hitCount = 0;
 		for (int j = 0; j < col; j++)
 		{
-			if (screenpoints[i][j] == 1)
+			if (screen[i][j] == '1')
 			{
 				bool yes = 0;
 				int it;
 				for (it = j + 1; it < col; it++)
 				{
-					if (screenpoints[i][it] == 1)
+					if (screen[i][j] != '1' && hitCount == 1)
+					{
+						i++;
+						j = -1;
+						hitCount = 0;
+						continue;
+					}
+					if (screen[i][it] == '1')
 					{
 						yes = 1;
 						break;
@@ -693,11 +740,12 @@ void printTriangle(const point &point1, const point &point2, const point &point3
 				}
 				if (yes)
 				{
-					for (int count = j; count <= it; count++)
+					for (int count = j; count < it; count++)
 					{
 						screen[i][count] = c;
 					}
 					j = it - 1;
+					hitCount++;
 				}
 				else
 				{
@@ -997,6 +1045,7 @@ void render()
 	for (auto& blocks : worldBlocks) blocks.add();
 	for (auto& model : sceneModels) model.addToScene();
 
+	camera.updateSinCos();
 	for (auto& tri : queue)
 	{
 		tri.p1 = transformtoCamSpace(tri.p1);
@@ -1416,20 +1465,15 @@ void showHello(float x = 0, float y = 0, float z = 0)
 
 void loadBuiltinBlocks()
 {
-	/*placeHouse(-5, -5, 0);
-	placeHouse(-18, -5, 0);
+	placeHouse(-5, -5, 0);
+	//placeHouse(-18, -5, 0);
 
-	placeTree(-24, -7, 0);*/
+	placeTree(-24, -7, 0);
 	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	showHello(-12, 12, 0);
 }
 void loadEquations()
 {
-	auto Sphere = make_unique<sphere>();
-	Sphere->pos = {-0.5, 0, 0};
-	sphereRef = Sphere.get();
-	Equations.push_back(move(Sphere));
-
 	//Sphere = make_unique<sphere>();
 	//Sphere->pos = {0, 1.2, 0};
 	//Equations.push_back(move(Sphere));
@@ -1450,6 +1494,11 @@ void loadEquations()
 	//Sphere->pos = {0, 0.6, 2.0};
 	//Equations.push_back(move(Sphere));
 
+	auto Sphere = make_unique<sphere>();
+	Sphere->pos = {-0.5, 0, 0};
+	sphereRef = Sphere.get();
+	Equations.push_back(move(Sphere));
+
 	auto Torus = make_unique<torus>();
 	Torus->pos = {2, 0, 0};
 	//Torus->scaleAxis = {2, 1, 1};
@@ -1464,19 +1513,25 @@ void loadEquations()
 	//heartRef = Heart.get();
 	//Equations.push_back(move(Heart));
 
-	//auto Ripples = make_unique<ripples>();
-	//Ripples->pos = {2, -3, 0};
-	//Ripples->scale = 1;
-	//Equations.push_back(move(Ripples));
+	//auto GoursatTangle = make_unique<goursatTangle>();
+	//GoursatTangle->pos = {8, 4, 0};
+	//GoursatTangle->scale = 0.4;
+	//Equations.push_back(move(GoursatTangle));
 
-	//auto line = make_unique<line2D>();
-	//Equations.push_back(move(line));
+	//auto Shape1 = make_unique<shape1>();
+	//Shape1->a = -2;
+	//Shape1->pos = {10, 10, 0};
+	//shape1Ref = Shape1.get();
+	//Equations.push_back(move(Shape1));
+
+	auto Pipe = make_unique<pipe>();
+	Equations.push_back(move(Pipe));
 }
 void prepareWorld()
 {
 	loadModels();
 	loadBuiltinBlocks();
-	loadEquations();
+	//loadEquations();
 }
 
 int main()
@@ -1533,20 +1588,20 @@ int main()
 		chrono::duration<float> totalElapsed = (currentTime - startTime);
 		float totalElapsedSec = totalElapsed.count();
 
-		sunangle += 0.2 * deltaTime;
-		lightdir.z = sin(sunangle);
-		lightdir.y = cos(sunangle);
+		//sunangle += 0.2 * deltaTime;
+		//lightdir.z = sin(sunangle);
+		//lightdir.y = cos(sunangle);
 
-		torusRef->rot.x += 30 * deltaTime;
 		//torusRef->rot.x += 30 * deltaTime;
-		torusRef->rot.z += 30 * deltaTime;
-
-		//sphereRef->rot.x += 30 * deltaTime;
-		
-		sphereRef->pos = rotatePoint(sphereRef->pos - torusRef->pos, 30 * deltaTime, 0, 0) + torusRef->pos;
+		//torusRef->rot.z += 30 * deltaTime;
+		//
+		//sphereRef->pos = rotatePoint(sphereRef->pos - torusRef->pos, 30 * deltaTime, 0, 0) + torusRef->pos;
 
 		//heartRef->rot.x += 30 * deltaTime;
 		//heartRef->rot.z += 30 * deltaTime;
+
+		//shape1Ref->a = sin(totalElapsedSec) * 6 + 4;
+		//if(shape1Ref->a >= 10) shape1Ref->a = -2;
 
 		render();
 		show();
