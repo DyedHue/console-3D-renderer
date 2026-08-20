@@ -636,7 +636,7 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 
 void screenSet(int x, int y, char c = ch, bool clamp = 0)
 {
-	int _row = y, _col = x;
+	int _row = x, _col = y;
 
 	if (_row < row && _row >= 0 && _col < col && _col >= 0)
 	{
@@ -674,14 +674,14 @@ void pointConnect(const point &point1, const point &point2)
 	{
 		for (int i = min(y1, y2); i <= max(y1, y2); i++)
 		{
-			screenSet(x1, i, '1', 1);
+			screenSet(i, x1, '1', 1);
 		}
 	}
 	else if (y1 == y2)
 	{
 		for (int i = min(x1, x2); i <= max(x1, x2); i++)
 		{
-			screenSet(i, y1, '1', 1);
+			screenSet(y1, i, '1', 1);
 		}
 	}
 	else
@@ -696,7 +696,7 @@ void pointConnect(const point &point1, const point &point2)
 			{
 				int y = round(m * i + c);
 
-				screenSet(i, y, '1', 1);
+				screenSet(y, i, '1', 1);
 			}
 		}
 		else
@@ -705,7 +705,7 @@ void pointConnect(const point &point1, const point &point2)
 			{
 				int x = round(minv * (i - c));
 
-				screenSet(x, i, '1', 1);
+				screenSet(i, x, '1', 1);
 			}
 		}
 	}
@@ -713,9 +713,9 @@ void pointConnect(const point &point1, const point &point2)
 
 void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch)
 {
-	pointConnect(point(point1), point(point2));
-	pointConnect(point(point2), point(point3));
-	pointConnect(point(point3), point(point1));
+	pointConnect(point1, point2);
+	pointConnect(point2, point3);
+	pointConnect(point3, point1);
 
 	int lowHori = (std::min)({point1.y, point2.y, point3.y});
 	int highHori = (std::max)({point1.y, point2.y, point3.y});
@@ -1008,7 +1008,7 @@ void renderEquations(bool useMultithreading = true)
 
 					int brightnessIndex = round(brightness * (brightnessSymbols.length() - 1));
 
-					screenSet(j, i, brightnessSymbols[brightnessIndex]);
+					screenSet(i, j, brightnessSymbols[brightnessIndex]);
 				}
 			}
 		};
@@ -1268,7 +1268,7 @@ void loadModels()
 
 void show()
 {
-	screen[row / 2][col / 2] = 'O';
+	//screen[row / 2][col / 2] = 'O';
 
 #if HAS_NCURSES
 	if (useNcurses)
@@ -1461,10 +1461,10 @@ void showHello(float x = 0, float y = 0, float z = 0)
 
 void loadBuiltinBlocks()
 {
-	placeHouse(-5, -5, 0);
-	placeHouse(-18, -5, 0);
+	//placeHouse(-5, -5, 0);
+	//placeHouse(-18, -5, 0);
 
-	placeTree(-24, -7, 0);
+	//placeTree(-24, -7, 0);
 	showHello(-12, 12, 0);
 }
 void loadEquations()
@@ -1519,12 +1519,12 @@ void loadEquations()
 	//shape1Ref = Shape1.get();
 	//Equations.push_back(move(Shape1));
 
-	auto Pipe = make_unique<pipe>();
-	Equations.push_back(move(Pipe));
+	//auto Pipe = make_unique<pipe>();
+	//Equations.push_back(move(Pipe));
 }
 void prepareWorld()
 {
-	loadModels();
+	//loadModels();
 	loadBuiltinBlocks();
 	//loadEquations();
 }
@@ -1586,7 +1586,7 @@ int main()
 		//lightdir.y = cos(sunangle);
 
 		//torusRef->rot.x += 30 * deltaTime;
-		//torusRef->rot.z += 30 * deltaTime;
+		//torusRef->rot.y += 30 * deltaTime;
 		//
 		//sphereRef->pos = rotatePoint(sphereRef->pos - torusRef->pos, 30 * deltaTime, 0, 0) + torusRef->pos;
 
