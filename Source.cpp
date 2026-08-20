@@ -709,48 +709,43 @@ void pointConnect(const point &point1, const point &point2)
 
 void printTriangle(const point &point1, const point &point2, const point &point3, char c = ch)
 {
-	pointConnect(point1, point2);
-	pointConnect(point2, point3);
-	pointConnect(point3, point1);
+	pointConnect(point(point1), point(point2));
+	pointConnect(point(point2), point(point3));
+	pointConnect(point(point3), point(point1));
 
+	int lowHori = (std::min)({point1.y, point2.y, point3.y});
+	int highHori = (std::max)({point1.y, point2.y, point3.y});
+	int lowVer = (std::min)({point1.x, point2.x, point3.x});
+	int highVer = (std::max)({point1.x, point2.x, point3.x});
+	
 
-	for (int i = 0; i < row; i++)
+	if(lowHori < 0) lowHori = 0;
+	else if(lowHori > col-1) lowHori = col -1;
+	if(highHori < 0) highHori = 0;
+	else if(highHori > col-1) highHori = col -1;
+
+	if(lowVer < 0) lowVer = 0;
+	else if(lowVer > row-1) lowVer = row -1;
+	if(highVer < 0) highVer = 0;
+	else if(highVer > row -1) highVer = row - 1;
+
+	for (int i = lowVer; i <= highVer; i++)
 	{
-		bool hitCount = 0;
-		for (int j = 0; j < col; j++)
+		int start = -1, end = -1;
+		for (int j = lowHori; j <= highHori; j++)
 		{
 			if (screen[i][j] == '1')
 			{
-				bool yes = 0;
-				int it;
-				for (it = j + 1; it < col; it++)
-				{
-					if (screen[i][j] != '1' && hitCount == 1)
-					{
-						i++;
-						j = -1;
-						hitCount = 0;
-						continue;
-					}
-					if (screen[i][it] == '1')
-					{
-						yes = 1;
-						break;
-					}
-				}
-				if (yes)
-				{
-					for (int count = j; count < it; count++)
-					{
-						screen[i][count] = c;
-					}
-					j = it - 1;
-					hitCount++;
-				}
-				else
-				{
-					screen[i][j] = c;
-				}
+				if(start == -1) start = j;
+				else end = max(end, j);
+			}
+		}
+		if (end == -1) screen[i][start] = c;
+		else
+		{
+			for (int it = start; it <= end; it++)
+			{
+				screen[i][it] = c;
 			}
 		}
 	}
@@ -778,9 +773,9 @@ void renderTriangle3d(const TriangleToRender& tri)
 	if (tri.p1.y < near_plane || tri.p2.y < near_plane || tri.p3.y < near_plane)
 		return;
 
-	point point1(project3d(tri.p1, 'x'), project3d(tri.p1, 'y'));
-	point point2(project3d(tri.p2, 'x'), project3d(tri.p2, 'y'));
-	point point3(project3d(tri.p3, 'x'), project3d(tri.p3, 'y'));
+	point point1 = {project3d(tri.p1, 'x'), project3d(tri.p1, 'y')};
+	point point2 = {project3d(tri.p2, 'x'), project3d(tri.p2, 'y')};
+	point point3 = {project3d(tri.p3, 'x'), project3d(tri.p3, 'y')};
 
 	point3d lightDirinv = lightdir * -1;
 
