@@ -117,6 +117,10 @@ public:
 	{
 		x = (row - 1) / 2 - Y, y = X + (col - 1) / 2;
 	}
+	bool isInsideScreen() const
+	{
+		return x >= 0 && y >= 0 && x <= row -1 && y <= col - 1;
+	}
 };
 
 class point3d
@@ -776,6 +780,9 @@ void renderTriangle3d(const TriangleToRender& tri)
 	point point1 = {project3d(tri.p1, 'x'), project3d(tri.p1, 'y')};
 	point point2 = {project3d(tri.p2, 'x'), project3d(tri.p2, 'y')};
 	point point3 = {project3d(tri.p3, 'x'), project3d(tri.p3, 'y')};
+	
+	if(!(point1.isInsideScreen() || point2.isInsideScreen() || point3.isInsideScreen()))
+		return;
 
 	point3d lightDirinv = lightdir * -1;
 
@@ -922,7 +929,6 @@ void renderEquations(bool useMultithreading = true)
 	vector<vector<float>> zbuffer(row, vector<float>(col, FLT_MAX));
 	vector<vector<int>> equationIndex(row, vector<int>(col, -1));
 
-	// Encapsulate the core logic into a lambda function
 	auto worker = [&](int start_row, int end_row)
 		{
 			for(int it = 0; it < size; it++)
@@ -989,7 +995,6 @@ void renderEquations(bool useMultithreading = true)
 				}
 			}
 
-			// Calculate lighting and update screen buffer
 			for (int i = start_row; i < end_row; i++)
 			{
 				for (int j = 0; j < col; j++)
@@ -1008,14 +1013,12 @@ void renderEquations(bool useMultithreading = true)
 			}
 		};
 
-	// --- EXECUTION BRANCH ---
 	if (useMultithreading)
 	{
 		int num_threads = std::thread::hardware_concurrency();
 		if (num_threads == 0) num_threads = 4;
-		std::vector<std::thread> threads;
+		vector<thread> threads;
 
-		// Split work among threads
 		int chunk_size = row / num_threads;
 		for (int t = 0; t < num_threads; t++) {
 			int start = t * chunk_size;
@@ -1029,7 +1032,6 @@ void renderEquations(bool useMultithreading = true)
 	}
 	else
 	{
-		// Execute everything on the main thread
 		worker(0, row);
 	}
 }
@@ -1360,7 +1362,6 @@ void action()
 	else if (justReleased(VK_ESCAPE))
 	{
 		mouseLocked = !mouseLocked;
-		//ShowCursor(!mouseLocked);
 	}
 
 	wasPressed = isPressed;
@@ -1461,10 +1462,9 @@ void showHello(float x = 0, float y = 0, float z = 0)
 void loadBuiltinBlocks()
 {
 	placeHouse(-5, -5, 0);
-	//placeHouse(-18, -5, 0);
+	placeHouse(-18, -5, 0);
 
 	placeTree(-24, -7, 0);
-	/*addTriangle3d({ 0, 0, 0 }, { 1, 0, 1 }, { 1, 0, 0 }, '@');*/
 	showHello(-12, 12, 0);
 }
 void loadEquations()
@@ -1544,7 +1544,6 @@ int main()
 #if HAS_NCURSES
 	if(useNcurses)
 	{
-		// 1. Initialize curses in non-blocking mode
 		initscr();
 		cbreak();
 		noecho();
@@ -1552,7 +1551,7 @@ int main()
 		timeout(0);
 		curs_set(0);
 
-		// 2. Enable mouse position tracking (not used but it helps make the terminal non selectable)
+		//Enable mouse position tracking (not used but it helps make the terminal non selectable)
 		mousemask(ALL_MOUSE_EVENTS | BUTTON_MOVED, NULL);
 
 		row = LINES - 3;
@@ -1566,7 +1565,6 @@ int main()
 	screenCenter.x = screen_width / 2;
 	screenCenter.y = screen_height / 2;
 
-	// Lock mouse initially
 	SetCursorPos(screenCenter.x, screenCenter.y);
 
 	auto lastTime = chrono::high_resolution_clock::now();
