@@ -43,6 +43,7 @@ float equationSolveTolerance = 0.1;
 
 vector<vector<char>> screen;
 float focalLengthpx;
+float cosCameraToCornerAngle;
 //const string brightnessSymbols = ".,-~:;=!*#$@";
 const string brightnessSymbols = ".,:-;!~*=#$@";
 //const string brightnessSymbols = " .-~:+=xX$#@WMB8&%Q0OZX";
@@ -67,6 +68,18 @@ auto startTime = chrono::high_resolution_clock::now();
 auto currentTime = startTime;
 
 //Helper functions {
+float ftoi_power(float n, int ex) //only upto 5
+{
+	switch (ex)
+	{
+	case 0: return 1;
+	case 1: return n;
+	case 2: return n * n;
+	case 3: return n * n * n;
+	case 4: return n * n * n * n;
+	case 5: return n * n * n * n * n;
+	}
+}
 float toradian(float angle) { return ((angle * PI) / 180.0f); }
 float todegree(float angle) { return (angle * (180.0f/PI)); }
 bool fileExists(const std::string& name) {
@@ -83,6 +96,7 @@ void constructScreen()
 {
 	screen.assign(row, vector<char>(col, ' '));
 	focalLengthpx = col / (2 * (tan(((hfov * PI) / 180.0f) / 2)));
+	cosCameraToCornerAngle = cos(atan(sqrt(pow((col-1)/2.0, 2) +  pow((row-1)/2.0, 2))/focalLengthpx));
 }
 bool justReleased(int button)
 {
@@ -92,18 +106,7 @@ bool justPressed(int button)
 {
 	return isPressed[button] && !wasPressed[button];
 }
-float ftoi_power(float n, int ex) //only upto 5
-{
-	switch (ex)
-	{
-	    case 0: return 1;
-	    case 1: return n;
-		case 2: return n * n;
-		case 3: return n * n * n;
-		case 4: return n * n * n * n;
-		case 5: return n * n * n * n * n;
-	}
-}
+
 // }
 
 class point //point on projection plane
@@ -169,7 +172,7 @@ public:
 	}
 };
 
-point3d lightdir = point3d(0, 0, -1);
+point3d lightdir = point3d(0, -1, -1);
 
 class Camera
 {
@@ -267,6 +270,16 @@ public:
 
 		return { x, y, z };
 	}
+	void lookAt(point3d target)
+	{
+		target = (target - point3d{x,y,z}).normalized();
+
+		float normalpitch = acos(target.z);
+		float normalyaw = atan2(target.y, target.x);
+
+		yaw = 90 - todegree(normalyaw);
+		pitch = todegree(normalpitch);
+	}
 	void updateSinCos()
 	{
 		float yawRad = toradian(yaw), pitchRad = toradian(pitch - 90), rollRad = toradian(roll);
@@ -281,7 +294,7 @@ public:
 	point3d p1, p2, p3;
 	char symbol;
 	point3d avgNor = { 0, 0, 1 };
-	float avg_dist;
+	float avg_dist = -1;
 	point3d n1 = { 0, 0, 1 }, n2 = { 0, 0, 1 }, n3 = { 0, 0, 1 };
 
 	void setAvgNormal()
@@ -291,12 +304,12 @@ public:
 };
 vector<TriangleToRender> queue;
 
-point3d rotatePoint(const point3d &p, float yaw = camera.yaw, float pitch = camera.pitch - 90, float roll = camera.roll)
+point3d rotatePoint(const point3d &p, float yaw = camera.yaw, float pitch = camera.pitch - 90, float roll = camera.roll, bool fromCamera = 0)
 {
 	float yawRad, pitchRad, rollRad;
 	float cosYaw, sinYaw, cosPitch, sinPitch, cosRoll, sinRoll;
 
-	if (yaw == camera.yaw && pitch == camera.pitch - 90 && roll == camera.roll)
+	if (fromCamera)
 	{
 		sinYaw = camera.sinYaw, cosYaw = camera.cosYaw, sinPitch = camera.sinPitch, cosPitch = camera.cosPitch, sinRoll = camera.sinRoll, cosRoll = camera.cosRoll;
 	}
@@ -634,9 +647,9 @@ void spawnModel(string filename, float x, float y, float z, float scale = 1.0f, 
 	sceneModels.push_back(m);
 }
 
-void screenSet(int x, int y, char c = ch, bool clamp = 0)
+void screenSet(int i, int j, char c = ch, bool clamp = 0)
 {
-	int _row = x, _col = y;
+	int _row = i, _col = j;
 
 	if (_row < row && _row >= 0 && _col < col && _col >= 0)
 	{
@@ -764,7 +777,7 @@ int project3d(const point3d &pointa, char c)
 
 point3d transformtoCamSpace(const point3d &w)
 {
-	return rotatePoint(w - point3d{camera.x, camera.y, camera.z});
+	return rotatePoint(w - point3d{camera.x, camera.y, camera.z}, camera.yaw, camera.pitch - 90, camera.roll, true);
 }
 point3d transformtoWorldSpace(const point3d& w)
 {
@@ -1042,9 +1055,18 @@ void render()
 	for (auto& blocks : worldBlocks) blocks.add();
 	for (auto& model : sceneModels) model.addToScene();
 
+	point3d camVec = camera.unitVector();
+	point3d camPos = {camera.x, camera.y, camera.z};
+	
 	camera.updateSinCos();
+	
 	for (auto& tri : queue)
 	{
+		if( (camVec * (tri.p1 - camPos).normalized()) < cosCameraToCornerAngle &&
+			(camVec * (tri.p2 - camPos).normalized()) < cosCameraToCornerAngle &&
+			(camVec * (tri.p3 - camPos).normalized()) < cosCameraToCornerAngle)
+			continue;
+
 		tri.p1 = transformtoCamSpace(tri.p1);
 		tri.p2 = transformtoCamSpace(tri.p2);
 		tri.p3 = transformtoCamSpace(tri.p3);
@@ -1056,8 +1078,10 @@ void render()
 											return a.avg_dist > b.avg_dist;
 										}
 	);
-	for (const auto& tri : queue) renderTriangle3d(tri);
-
+	for (const auto& tri : queue)
+	{
+		if(tri.avg_dist != -1) renderTriangle3d(tri);
+	}
 	renderEquations();
 }
 
@@ -1461,11 +1485,11 @@ void showHello(float x = 0, float y = 0, float z = 0)
 
 void loadBuiltinBlocks()
 {
-	//placeHouse(-5, -5, 0);
+	placeHouse(-5, -5, 0);
 	//placeHouse(-18, -5, 0);
 
 	//placeTree(-24, -7, 0);
-	showHello(-12, 12, 0);
+	//showHello(-12, 12, 0);
 }
 void loadEquations()
 {
@@ -1489,17 +1513,17 @@ void loadEquations()
 	//Sphere->pos = {0, 0.6, 2.0};
 	//Equations.push_back(move(Sphere));
 
-	auto Sphere = make_unique<sphere>();
-	Sphere->pos = {-0.5, 0, 0};
-	sphereRef = Sphere.get();
-	Equations.push_back(move(Sphere));
+	//auto Sphere = make_unique<sphere>();
+	//Sphere->pos = {-0.5, 0, 0};
+	//sphereRef = Sphere.get();
+	//Equations.push_back(move(Sphere));
 
-	auto Torus = make_unique<torus>();
-	Torus->pos = {2, 0, 0};
-	//Torus->scaleAxis = {2, 1, 1};
+	//auto Torus = make_unique<torus>();
+	//Torus->pos = {2, 0, 0};
+	////Torus->scaleAxis = {2, 1, 1};
 	//Torus->rot = {30, 0, 0};
-	torusRef = Torus.get();
-	Equations.push_back(move(Torus));
+	//torusRef = Torus.get();
+	//Equations.push_back(move(Torus));
 
 	//auto Heart = make_unique<heart>();
 	//Heart->pos = {2, -3, 0};
@@ -1513,11 +1537,11 @@ void loadEquations()
 	//GoursatTangle->scale = 0.4;
 	//Equations.push_back(move(GoursatTangle));
 
-	//auto Shape1 = make_unique<shape1>();
-	//Shape1->a = -2;
-	//Shape1->pos = {10, 10, 0};
-	//shape1Ref = Shape1.get();
-	//Equations.push_back(move(Shape1));
+	auto Shape1 = make_unique<shape1>();
+	Shape1->a = -2;
+	Shape1->pos = {10, 10, 0};
+	shape1Ref = Shape1.get();
+	Equations.push_back(move(Shape1));
 
 	//auto Pipe = make_unique<pipe>();
 	//Equations.push_back(move(Pipe));
@@ -1570,7 +1594,7 @@ int main()
 	auto lastTime = chrono::high_resolution_clock::now();
 	startTime = lastTime;
 
-	float sunangle = 180;
+	float sunangle = 90;
 	while (1)
 	{
 		currentTime = chrono::high_resolution_clock::now();
@@ -1595,6 +1619,13 @@ int main()
 
 		//shape1Ref->a = sin(totalElapsedSec) * 6 + 4;
 		//if(shape1Ref->a >= 10) shape1Ref->a = -2;
+
+		point3d center = {-5 + 2.5, -5 - 2.5, 3};
+
+		point3d camPos = {camera.x, camera.y, camera.z};
+		camPos = rotatePoint(camPos - center, 30 * deltaTime, 0, 0) + center;
+		camera = {camPos.x, camPos.y, camPos.z};
+		camera.lookAt(center);
 
 		render();
 		show();
